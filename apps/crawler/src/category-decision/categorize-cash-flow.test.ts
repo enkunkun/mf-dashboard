@@ -109,6 +109,30 @@ describe("categorizeCashFlowMonth", () => {
     ).toBe("new");
   });
 
+  test("既存の未分類取引も明示指定時は再分類対象にする", async () => {
+    const db = {} as Parameters<typeof categorizeCashFlowMonth>[0]["db"];
+    const initialCashFlow = cashFlow("2026-06", [item("existing")]);
+    vi.mocked(findExistingTransactionMfIds).mockResolvedValue(new Set(["existing"]));
+    vi.mocked(applyCategoryDecisions).mockResolvedValue({
+      appliedCount: 0,
+      appliedDecisions: [],
+    });
+
+    await categorizeCashFlowMonth({
+      page: {} as Page,
+      db,
+      cashFlow: initialCashFlow,
+      config,
+      usage: { llmCallsUsed: 0 },
+      includeExisting: true,
+    });
+
+    expect(vi.mocked(applyCategoryDecisions).mock.calls[0]?.[0].decisions).toHaveLength(1);
+    expect(
+      vi.mocked(applyCategoryDecisions).mock.calls[0]?.[0].decisions[0]?.transaction.mfId,
+    ).toBe("existing");
+  });
+
   test("カテゴリ反映後も元の月跨ぎ表示期間と取引集合を保持する", async () => {
     const initialCashFlow = {
       ...cashFlow("2026-08", [item("initial-new")]),

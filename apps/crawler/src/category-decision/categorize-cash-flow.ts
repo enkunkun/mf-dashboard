@@ -35,22 +35,24 @@ function toTransactionForCategorization(item: CashFlowItem): TransactionForCateg
 function toCategorizationTargets(
   items: CashFlowItem[],
   existingMfIds: Set<string>,
+  includeExisting: boolean,
 ): TransactionForCategorization[] {
   return selectTransactionsForCategorization(
     items
       .map(toTransactionForCategorization)
       .filter((item): item is TransactionForCategorization => item !== null),
-    existingMfIds,
+    includeExisting ? new Set() : existingMfIds,
   );
 }
 
 async function findCategorizationTargets(
   db: Db,
   cashFlow: CashFlowSummary,
+  includeExisting: boolean,
 ): Promise<TransactionForCategorization[]> {
   const mfIds = cashFlow.items.map((item) => item.mfId);
   const existingMfIds = await findExistingTransactionMfIds(db, mfIds);
-  return toCategorizationTargets(cashFlow.items, existingMfIds);
+  return toCategorizationTargets(cashFlow.items, existingMfIds, includeExisting);
 }
 
 function applyDecisionsToCashFlow(
@@ -90,11 +92,12 @@ export async function categorizeCashFlowMonth(options: {
   cashFlow: CashFlowSummary;
   config: NormalizedCategoryDecisionConfig;
   usage: CategoryDecisionUsage;
+  includeExisting?: boolean;
 }): Promise<CashFlowSummary> {
-  const { page, db, cashFlow, config, usage } = options;
+  const { page, db, cashFlow, config, usage, includeExisting = false } = options;
 
   try {
-    const targets = await findCategorizationTargets(db, cashFlow);
+    const targets = await findCategorizationTargets(db, cashFlow, includeExisting);
     if (targets.length === 0) return cashFlow;
 
     const candidates = await scrapeCategoryCandidates(page);

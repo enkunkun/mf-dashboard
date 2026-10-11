@@ -260,7 +260,10 @@ export async function runInstitutionCategoryPhase(page: Page): Promise<Map<strin
 export async function runCashFlowHistoryPhase(
   db: Db,
   page: Page,
-  config: Pick<CrawlerConfig, "isHistoryMode" | "targetMonth"> & { activeAccountingMonth?: string },
+  config: Pick<CrawlerConfig, "isHistoryMode" | "targetMonth"> & {
+    activeAccountingMonth?: string;
+    includeExistingUncategorized?: boolean;
+  },
   categoryDecision: CategoryDecisionRuntime = { config: null, usage: { llmCallsUsed: 0 } },
   progress?: CrawlerProgressReporter,
   publishHistory: (months: TransactionPeriodReplacement[]) => Promise<number[]> = async (
@@ -359,6 +362,7 @@ export async function runCashFlowHistoryPhase(
             cashFlow: monthData,
             config: categoryDecision.config,
             usage: categoryDecision.usage,
+            ...(config.includeExistingUncategorized === true ? { includeExisting: true } : {}),
           })
         : monthData;
       preparedMonths.push({

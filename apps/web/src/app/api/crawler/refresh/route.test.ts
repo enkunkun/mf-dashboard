@@ -149,6 +149,22 @@ describe("/api/crawler/refresh/", () => {
     expect(requestInit?.body).toBe(JSON.stringify({ month: "2025-07" }));
   });
 
+  it("forwards the request to classify uncategorized transactions for that month", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(jsonResponse({ running: true }, 202));
+
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ month: "2025-07", categorizeUncategorized: true }),
+      ),
+    );
+
+    expect(res.status).toBe(202);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({ month: "2025-07", categorizeUncategorized: true }),
+    );
+  });
+
   it("rejects an invalid requested month before calling the crawler", async () => {
     const res = await POST(
       sameOriginPostRequest(
@@ -158,6 +174,19 @@ describe("/api/crawler/refresh/", () => {
     );
 
     expect(res.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-boolean classification option before calling the crawler", async () => {
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ month: "2025-07", categorizeUncategorized: "yes" }),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "Invalid categorization option" });
     expect(global.fetch).not.toHaveBeenCalled();
   });
 

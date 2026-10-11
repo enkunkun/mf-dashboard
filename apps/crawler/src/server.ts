@@ -20,7 +20,10 @@ const DEFAULT_HOST = "127.0.0.1";
 
 interface CrawlerTriggerServerOptions {
   getState?: () => Promise<CrawlerRunState>;
-  startRun?: (options?: { month?: string }) => Promise<CrawlerRunState>;
+  startRun?: (options?: {
+    month?: string;
+    categorizeUncategorized?: boolean;
+  }) => Promise<CrawlerRunState>;
   watchState?: (onChange: () => void, onError: (err: Error) => void) => Promise<() => void>;
 }
 
@@ -44,7 +47,9 @@ function methodNotAllowed(response: ServerResponse): void {
   response.end();
 }
 
-async function readRunOptions(request: IncomingMessage): Promise<{ month?: string } | null> {
+async function readRunOptions(
+  request: IncomingMessage,
+): Promise<{ month?: string; categorizeUncategorized?: boolean } | null> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -59,9 +64,16 @@ async function readRunOptions(request: IncomingMessage): Promise<{ month?: strin
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
     const month = Reflect.get(body, "month");
-    if (month === undefined) return {};
+    const categorizeUncategorized = Reflect.get(body, "categorizeUncategorized");
+    if (month === undefined) return categorizeUncategorized === undefined ? {} : null;
     if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
-    return { month };
+    if (categorizeUncategorized !== undefined && typeof categorizeUncategorized !== "boolean") {
+      return null;
+    }
+    return {
+      month,
+      ...(categorizeUncategorized === true ? { categorizeUncategorized: true } : {}),
+    };
   } catch {
     return null;
   }
@@ -215,7 +227,9 @@ async function streamCrawlerState(
   }
 }
 
-export async function startCrawlerRun(options: { month?: string } = {}): Promise<CrawlerRunState> {
+export async function startCrawlerRun(
+  options: { month?: string; categorizeUncategorized?: boolean } = {},
+): Promise<CrawlerRunState> {
   const lock = await acquireCrawlerRunLock("manual");
   let progress: Awaited<ReturnType<typeof createCrawlerProgressReporter>>;
   try {
