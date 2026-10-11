@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
 import { z } from "zod";
+import { getAgentObservabilityInstrumentation } from "./agent-observability.js";
 import { getModel, isLLMEnabled } from "./config.js";
 
 export interface CategoryCandidateForLLM {
@@ -58,8 +60,12 @@ export async function generateCategoryDecisionWithLLM(options: {
     null,
     2,
   );
+  const instrumentation = await getAgentObservabilityInstrumentation();
+  const { prepareStep: _prepareStep, ...telemetryHooks } =
+    instrumentation?.generateTextHooks({ conversationId: randomUUID() }) ?? {};
 
   const result = await generateText({
+    ...telemetryHooks,
     model: getModel(),
     output: Output.object({ schema: categoryDecisionSchema }),
     system:
