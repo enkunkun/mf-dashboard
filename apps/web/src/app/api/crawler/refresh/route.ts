@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const REQUEST_TIMEOUT_MS = 5_000;
 
-function isSameOriginRead(request: Request): boolean {
+function isSameOriginBrowserRequest(request: Request): boolean {
   return request.headers.get("sec-fetch-site") === "same-origin" || isSameOriginRequest(request);
 }
 
@@ -101,7 +101,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!isSameOriginRead(request)) {
+  if (!isSameOriginBrowserRequest(request)) {
     return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   }
 
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!isSameOriginRequest(request)) {
+  if (!isSameOriginBrowserRequest(request)) {
     return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   }
 
