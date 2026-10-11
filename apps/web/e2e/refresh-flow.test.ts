@@ -9,6 +9,13 @@ async function resetCrawler(request: APIRequestContext): Promise<void> {
 
 async function startRefresh(page: Page): Promise<void> {
   await page.goto("/");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`${mockCrawlerUrl}/__test/state`);
+      const body = (await response.json()) as { eventClients: number };
+      return body.eventClients;
+    })
+    .toBeGreaterThan(0);
   await page.getByRole("button", { name: "金融機関データを更新" }).click();
   await expect(page.getByRole("button", { name: "同期タイムラインを表示" })).toBeVisible();
 }
@@ -64,9 +71,7 @@ test.describe("Crawler refresh flow", () => {
     const failResponse = await request.post(`${mockCrawlerUrl}/__test/fail`);
     expect(failResponse.ok()).toBe(true);
 
-    const failedButton = page.getByRole("button", { name: "同期失敗の詳細を表示" });
-    await expect(failedButton).toBeVisible();
-    await failedButton.click();
+    await expect(page.getByRole("button", { name: "同期失敗の詳細を表示" })).toBeVisible();
 
     const details = page.locator('[aria-label="同期失敗の詳細"]');
     await expect(details.getByRole("heading", { name: "同期に失敗しました" })).toBeVisible();
@@ -79,10 +84,15 @@ test.describe("Crawler refresh flow", () => {
         const response = await request.get(`${mockCrawlerUrl}/__test/state`);
         const body = (await response.json()) as {
           runCount: number;
+          eventClients: number;
           state: { running: boolean };
         };
-        return { runCount: body.runCount, running: body.state.running };
+        return {
+          runCount: body.runCount,
+          running: body.state.running,
+          eventClients: body.eventClients,
+        };
       })
-      .toEqual({ runCount: 2, running: true });
+      .toEqual({ runCount: 2, running: true, eventClients: 1 });
   });
 });

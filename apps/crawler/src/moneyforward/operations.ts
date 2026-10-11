@@ -4,13 +4,11 @@ import { getCsrfToken, updateTransactionCategory } from "../hooks/helpers.js";
 import { scrapeCashFlowHistory } from "../scrapers/cash-flow-history.js";
 import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 
-export interface SetCalculationExclusionOperation {
+export type MoneyForwardOperation = {
   type: "set-calculation-exclusion";
   transactionId: string;
   excluded: boolean;
-}
-
-export type MoneyForwardOperation = SetCalculationExclusionOperation;
+};
 
 export async function applyMoneyForwardOperation(
   page: Page,
