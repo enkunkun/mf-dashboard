@@ -15,6 +15,7 @@ import { TransactionTable } from "../../../components/info/transaction-table/tra
 import { MonthSelector } from "../../../components/layout/month-selector";
 import { PageLayout } from "../../../components/layout/page-layout";
 import { formatMonth } from "../../../lib/format";
+import { ClassifyUncategorizedButton } from "./_components/classify-uncategorized-button";
 import { formatCashFlowPageTitle } from "./page-title";
 
 export async function generateStaticParams() {
@@ -44,7 +45,12 @@ export async function CFMonthContent({ month, groupId }: { month: string; groupI
     <PageLayout
       title={`収支 - ${formatMonth(month)}`}
       href={mfUrls.cashFlow}
-      options={<MonthSelector currentMonth={month} basePath={basePath} groupId={groupId} />}
+      options={
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          {!groupId && <ClassifyUncategorizedButton month={month} />}
+          <MonthSelector currentMonth={month} basePath={basePath} groupId={groupId} />
+        </div>
+      }
     >
       <SankeyDiagram month={month} groupId={groupId} />
 

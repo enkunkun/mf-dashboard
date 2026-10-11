@@ -581,7 +581,7 @@ describe("runCashFlowHistoryPhase", () => {
     }
   });
 
-  test("カテゴリ決定が有効な場合は履歴月を分類してから取引保存する", async () => {
+  test("指定月の再分類ではDBに存在する未分類取引も判定する", async () => {
     const page = {};
     const db = {};
     const originalCashFlow = cashFlow("2026-06", "Service A");
@@ -608,7 +608,7 @@ describe("runCashFlowHistoryPhase", () => {
     await runCashFlowHistoryPhase(
       db as Parameters<typeof runCashFlowHistoryPhase>[0],
       page as Parameters<typeof runCashFlowHistoryPhase>[1],
-      { isHistoryMode: true },
+      { isHistoryMode: false, targetMonth: "2026-06", includeExistingUncategorized: true },
       categoryDecision,
     );
 
@@ -618,6 +618,7 @@ describe("runCashFlowHistoryPhase", () => {
       cashFlow: originalCashFlow,
       config: categoryDecision.config,
       usage: categoryDecision.usage,
+      includeExisting: true,
     });
     expect(saveTransactionsForMonths).toHaveBeenCalledWith(
       db,

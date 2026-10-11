@@ -307,7 +307,7 @@ docker compose up -d web
 
 ### 未分類取引のカテゴリ決定
 
-`data/category-rules.json`を作成すると、crawlerはデータベースへ保存する前に、新規の未分類取引へカテゴリを設定する。ファイルが存在しない場合、この機能は無効になり、取引を未分類のまま保存する。
+`data/category-rules.json`を作成すると、crawlerはデータベースへ保存する前に、新規の未分類取引へカテゴリを設定する。ファイルが存在しない場合、この機能は無効になり、取引を未分類のまま保存する。既存データは月別収支ページの「未分類をAI分類」から対象月だけを再処理できる。設定済みルール/LLMでMoneyForward MEのカテゴリを更新した後、その月の明細を再取得する。
 
 ```sh
 cp data/category-rules.example.json data/category-rules.json
@@ -339,7 +339,8 @@ cp data/category-rules.example.json data/category-rules.json
 
 #### 固定ルール
 
-- 対象は「新規」「未分類」「非振替」「計算対象」の取引のみ
+- 通常の自動処理の対象は「新規」「未分類」「非振替」「計算対象」の取引のみ
+- 月別ページから明示的に再処理した場合は、対象月の既存「未分類」取引も含める
 - `accountName`は取引の口座名と完全一致する
 - `descriptionContains`は取引内容と部分一致する
 - 両方を指定した場合は、両条件に一致する取引だけを対象にする

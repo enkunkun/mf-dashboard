@@ -123,6 +123,33 @@ afterEach(async () => {
 });
 
 describe("runCrawler progress", () => {
+  test("分類設定がない場合は未分類取引の再処理を開始しない", async () => {
+    vi.mocked(runLoadPhase).mockReturnValueOnce({
+      skipRefresh: false,
+      cleanupGroups: false,
+      authState: "configured",
+      dbPath: "/tmp/demo.db",
+      dbExists: true,
+      scrapeMode: "month",
+      isHistoryMode: false,
+      isDebug: false,
+      isHeaded: false,
+      targetMonth: "2025-07",
+    });
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "uncategorized.json"), {
+      id: "run-uncategorized",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await expect(
+      runCrawler(progress, { month: "2025-07", categorizeUncategorized: true }),
+    ).rejects.toThrow("Uncategorized classification is not configured");
+
+    expect(runCashFlowHistoryPhase).not.toHaveBeenCalled();
+    expect(handleCrawlerFailure).toHaveBeenCalled();
+  });
+
   test("指定月の再取り込みは全口座スクレイプをせず対象月と分析だけ更新する", async () => {
     vi.mocked(runLoadPhase).mockReturnValueOnce({
       skipRefresh: false,

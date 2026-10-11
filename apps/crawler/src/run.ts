@@ -38,7 +38,7 @@ async function disposeGroupScope(
 
 export async function runCrawler(
   progress: CrawlerProgressReporter,
-  options: { month?: string } = {},
+  options: { month?: string; categorizeUncategorized?: boolean } = {},
 ): Promise<void> {
   const config = runLoadPhase(options.month);
   let runtime: CrawlerRuntime | null = null;
@@ -54,11 +54,18 @@ export async function runCrawler(
     );
 
     if (config.targetMonth) {
+      if (options.categorizeUncategorized && !activeRuntime.categoryDecision.config) {
+        throw new Error("Uncategorized classification is not configured");
+      }
       await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, () =>
         runCashFlowHistoryPhase(
           activeRuntime.db,
           activeRuntime.page,
-          { isHistoryMode: false, targetMonth: config.targetMonth },
+          {
+            isHistoryMode: false,
+            targetMonth: config.targetMonth,
+            includeExistingUncategorized: options.categorizeUncategorized === true,
+          },
           activeRuntime.categoryDecision,
           progress,
         ),

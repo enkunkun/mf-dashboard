@@ -129,13 +129,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
   const month = typeof body === "object" && body !== null ? Reflect.get(body, "month") : null;
+  const categorizeUncategorized =
+    typeof body === "object" && body !== null
+      ? Reflect.get(body, "categorizeUncategorized")
+      : undefined;
   if (Array.isArray(body) || typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return NextResponse.json({ error: "Invalid month" }, { status: 400 });
+  }
+  if (categorizeUncategorized !== undefined && typeof categorizeUncategorized !== "boolean") {
+    return NextResponse.json({ error: "Invalid categorization option" }, { status: 400 });
   }
 
   return proxyCrawlerRequest("/runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ month }),
+    body: JSON.stringify({
+      month,
+      ...(categorizeUncategorized === true ? { categorizeUncategorized: true } : {}),
+    }),
   });
 }

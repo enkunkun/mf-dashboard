@@ -232,6 +232,34 @@ describe("crawler trigger server", () => {
     expect(startRun).toHaveBeenCalledWith({ month: "2025-07" });
   });
 
+  test("starts requested-month uncategorized classification", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ month: "2025-07", categorizeUncategorized: true }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({ month: "2025-07", categorizeUncategorized: true });
+  });
+
+  test("rejects a categorization request without a target month", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ categorizeUncategorized: true }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   test("rejects invalid target months", async () => {
     const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
     const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
