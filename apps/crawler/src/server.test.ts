@@ -218,6 +218,34 @@ describe("crawler trigger server", () => {
     expect(startRun).toHaveBeenCalledTimes(1);
   });
 
+  test("starts a manual run for a requested month", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ month: "2025-07" }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({ month: "2025-07" });
+  });
+
+  test("rejects invalid target months", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ month: "2025-13" }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   test("returns conflict when a run is already active", async () => {
     const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => {
       throw new CrawlerAlreadyRunningError(runningState);

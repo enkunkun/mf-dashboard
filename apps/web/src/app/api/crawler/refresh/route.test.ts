@@ -28,7 +28,7 @@ function eventStreamResponse(body: unknown): Response {
 
 const unavailableEvent = `data: ${JSON.stringify(unavailableCrawlerRefreshStatus)}\n\n`;
 
-function sameOriginPostRequest(headers: HeadersInit = {}): Request {
+function sameOriginPostRequest(headers: HeadersInit = {}, body?: string): Request {
   const requestHeaders = new Headers({
     origin: "https://dashboard.example.com",
     "x-forwarded-host": "dashboard.example.com",
@@ -39,6 +39,7 @@ function sameOriginPostRequest(headers: HeadersInit = {}): Request {
   return new Request("http://web:8765/api/crawler/refresh/", {
     method: "POST",
     headers: requestHeaders,
+    body,
   });
 }
 
@@ -131,6 +132,33 @@ describe("/api/crawler/refresh/", () => {
     await expect(res.json()).resolves.toEqual(
       expect.objectContaining({ available: true, running: true, latestRun: null }),
     );
+  });
+
+  it("forwards a requested month for targeted reimport", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(jsonResponse({ running: true }, 202));
+
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ month: "2025-07" }),
+      ),
+    );
+
+    expect(res.status).toBe(202);
+    const requestInit = vi.mocked(global.fetch).mock.calls[0]?.[1];
+    expect(requestInit?.body).toBe(JSON.stringify({ month: "2025-07" }));
+  });
+
+  it("rejects an invalid requested month before calling the crawler", async () => {
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ month: "2025-13" }),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("rejects an unauthenticated crawler run", async () => {

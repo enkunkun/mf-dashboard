@@ -117,5 +117,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
   }
 
-  return proxyCrawlerRequest("/runs", { method: "POST" });
+  const rawBody = await request.text();
+  if (!rawBody) return proxyCrawlerRequest("/runs", { method: "POST" });
+  if (rawBody.length > 1024)
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+  const month = typeof body === "object" && body !== null ? Reflect.get(body, "month") : null;
+  if (Array.isArray(body) || typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return NextResponse.json({ error: "Invalid month" }, { status: 400 });
+  }
+
+  return proxyCrawlerRequest("/runs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ month }),
+  });
 }

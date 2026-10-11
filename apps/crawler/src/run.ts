@@ -1,4 +1,5 @@
 import { closeDb } from "@mf-dashboard/db";
+import { getAllGroups } from "@mf-dashboard/db/queries/groups";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
 import {
   handleCrawlerFailure,
@@ -35,8 +36,11 @@ async function disposeGroupScope(
   }
 }
 
-export async function runCrawler(progress: CrawlerProgressReporter): Promise<void> {
-  const config = runLoadPhase();
+export async function runCrawler(
+  progress: CrawlerProgressReporter,
+  options: { month?: string } = {},
+): Promise<void> {
+  const config = runLoadPhase(options.month);
   let runtime: CrawlerRuntime | null = null;
 
   try {
@@ -48,6 +52,38 @@ export async function runCrawler(progress: CrawlerProgressReporter): Promise<voi
       () => runAuthPhase(activeRuntime.page, activeRuntime.context),
       { failureCode: "auth_failed" },
     );
+
+    if (config.targetMonth) {
+      await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, () =>
+        runCashFlowHistoryPhase(
+          activeRuntime.db,
+          activeRuntime.page,
+          { isHistoryMode: false, targetMonth: config.targetMonth },
+          activeRuntime.categoryDecision,
+          progress,
+        ),
+      );
+      const groups = await getAllGroups(activeRuntime.db);
+      await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
+        runAnalyticsPhase(
+          activeRuntime.db,
+          groups.map((group) => ({ group })),
+        ),
+      );
+      const webRefreshStep = await progress.startStep(CRAWLER_STEPS.webCacheRefresh);
+      try {
+        await notifyWebRefresh();
+        await progress.completeStep(webRefreshStep);
+      } catch (err) {
+        await progress.warnStep(
+          webRefreshStep,
+          normalizeCrawlerError(err, "web_cache_refresh_failed"),
+        );
+        error("Failed to refresh web cache:", err);
+      }
+      info(`Reimported MoneyForward cash flow for ${config.targetMonth}`);
+      return;
+    }
 
     let scrapeResult: Awaited<ReturnType<typeof runScrapePhase>>;
     let originalGroup: Awaited<ReturnType<typeof createGroupScope>>["originalGroup"];

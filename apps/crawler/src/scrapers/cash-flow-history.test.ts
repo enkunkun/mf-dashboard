@@ -94,6 +94,20 @@ describe("verifyCashFlowRowsComplete", () => {
 });
 
 describe("scrapeCashFlowHistory", () => {
+  test("invalid target month is rejected before reading account data", async () => {
+    const detailTable = {
+      waitFor: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    } as unknown as Locator;
+    const page = {
+      goto: vi.fn<() => Promise<null>>().mockResolvedValue(null),
+      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(detailTable),
+    } as unknown as Page;
+
+    await expect(scrapeCashFlowHistory(page, 1, { targetMonth: "2025-13" })).rejects.toThrow(
+      "Invalid target cash flow month",
+    );
+  });
+
   test("前月 navigation の失敗を対象月の callback に通知する", async () => {
     const detailTable = {
       waitFor: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),

@@ -318,6 +318,27 @@ describe("runCashFlowHistoryPhase", () => {
     expect(publishHistory).toHaveBeenCalledWith([]);
   });
 
+  test("指定月だけ取得してその月の明細を差し替える", async () => {
+    vi.mocked(scrapeCashFlowHistory).mockResolvedValue([]);
+    const publishHistory = vi.fn<() => Promise<number[]>>().mockResolvedValue([]);
+
+    await runCashFlowHistoryPhase(
+      {} as never,
+      {} as never,
+      { isHistoryMode: false, targetMonth: "2025-07" },
+      undefined,
+      undefined,
+      publishHistory,
+    );
+
+    expect(scrapeCashFlowHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      1,
+      expect.objectContaining({ targetMonth: "2025-07" }),
+    );
+    expect(hasCashFlowPeriod).not.toHaveBeenCalled();
+  });
+
   test("history modeで既存期間が揃っていても当月と直前期間を再取得する", async () => {
     vi.mocked(hasCashFlowPeriod).mockResolvedValue(true);
     vi.mocked(scrapeCashFlowHistory).mockResolvedValue([]);
