@@ -246,6 +246,42 @@ describe("crawler trigger server", () => {
     expect(startRun).toHaveBeenCalledWith({ month: "2025-07", categorizeUncategorized: true });
   });
 
+  test("starts an allowlisted MoneyForward calculation-exclusion operation", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/operations`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "set-calculation-exclusion",
+        month: "2025-07",
+        transactionId: "mf-tx-1",
+        excluded: true,
+      }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({
+      month: "2025-07",
+      operation: { type: "set-calculation-exclusion", transactionId: "mf-tx-1", excluded: true },
+    });
+  });
+
+  test("rejects unknown MoneyForward operations", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/operations`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ type: "arbitrary-update", month: "2025-07" }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   test("rejects a categorization request without a target month", async () => {
     const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
     const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));

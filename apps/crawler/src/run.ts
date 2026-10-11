@@ -21,7 +21,8 @@ import {
   type CrawlerProgressReporter,
 } from "./crawler-progress.js";
 import { error, info, warn } from "./logger.js";
-import { createGroupScope } from "./scrapers/group.js";
+import { applyMoneyForwardOperation } from "./moneyforward/operations.js";
+import { createGroupScope, NO_GROUP_ID, switchGroup } from "./scrapers/group.js";
 import { notifyWebRefresh } from "./web-refresh.js";
 
 async function disposeGroupScope(
@@ -38,7 +39,11 @@ async function disposeGroupScope(
 
 export async function runCrawler(
   progress: CrawlerProgressReporter,
-  options: { month?: string; categorizeUncategorized?: boolean } = {},
+  options: {
+    month?: string;
+    categorizeUncategorized?: boolean;
+    operation?: import("./moneyforward/operations.js").MoneyForwardOperation;
+  } = {},
 ): Promise<void> {
   const config = runLoadPhase(options.month);
   let runtime: CrawlerRuntime | null = null;
@@ -52,6 +57,22 @@ export async function runCrawler(
       () => runAuthPhase(activeRuntime.page, activeRuntime.context),
       { failureCode: "auth_failed" },
     );
+
+    if (options.operation) {
+      if (!config.targetMonth) throw new Error("MoneyForward operations require a target month");
+      await runCrawlerStep(
+        progress,
+        CRAWLER_STEPS.monthlyCashFlow,
+        async () => {
+          await switchGroup(activeRuntime.page, NO_GROUP_ID);
+          await applyMoneyForwardOperation(activeRuntime.page, {
+            ...options.operation!,
+            month: config.targetMonth!,
+          });
+        },
+        { metadata: { month: config.targetMonth } },
+      );
+    }
 
     if (config.targetMonth) {
       if (options.categorizeUncategorized && !activeRuntime.categoryDecision.config) {

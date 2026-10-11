@@ -14,6 +14,7 @@ import {
 } from "./crawler-run-lock.js";
 import { getCrawlerRunStatePath } from "./crawler-run-state.js";
 import { error, info } from "./logger.js";
+import type { MoneyForwardOperation } from "./moneyforward/operations.js";
 
 const DEFAULT_PORT = 8766;
 const DEFAULT_HOST = "127.0.0.1";
@@ -23,6 +24,7 @@ interface CrawlerTriggerServerOptions {
   startRun?: (options?: {
     month?: string;
     categorizeUncategorized?: boolean;
+    operation?: MoneyForwardOperation;
   }) => Promise<CrawlerRunState>;
   watchState?: (onChange: () => void, onError: (err: Error) => void) => Promise<() => void>;
 }
@@ -74,6 +76,39 @@ async function readRunOptions(
       month,
       ...(categorizeUncategorized === true ? { categorizeUncategorized: true } : {}),
     };
+  } catch {
+    return null;
+  }
+}
+
+async function readMoneyForwardOperation(
+  request: IncomingMessage,
+): Promise<{ month: string; operation: MoneyForwardOperation } | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 1024) return null;
+    chunks.push(buffer);
+  }
+  try {
+    const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+    const type = Reflect.get(body, "type");
+    const month = Reflect.get(body, "month");
+    const transactionId = Reflect.get(body, "transactionId");
+    const excluded = Reflect.get(body, "excluded");
+    if (
+      type !== "set-calculation-exclusion" ||
+      typeof month !== "string" ||
+      !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
+      typeof transactionId !== "string" ||
+      !/^[\w-]{1,200}$/.test(transactionId) ||
+      typeof excluded !== "boolean"
+    )
+      return null;
+    return { month, operation: { type, transactionId, excluded } };
   } catch {
     return null;
   }
@@ -228,7 +263,11 @@ async function streamCrawlerState(
 }
 
 export async function startCrawlerRun(
-  options: { month?: string; categorizeUncategorized?: boolean } = {},
+  options: {
+    month?: string;
+    categorizeUncategorized?: boolean;
+    operation?: MoneyForwardOperation;
+  } = {},
 ): Promise<CrawlerRunState> {
   const lock = await acquireCrawlerRunLock("manual");
   let progress: Awaited<ReturnType<typeof createCrawlerProgressReporter>>;
@@ -322,6 +361,32 @@ export function createCrawlerTriggerServer(options: CrawlerTriggerServerOptions 
             return;
           }
 
+          throw err;
+        }
+        return;
+      }
+
+      if (url.pathname === "/operations") {
+        if (request.method !== "POST") {
+          methodNotAllowed(response);
+          return;
+        }
+        if (!hasValidRefreshToken(request)) {
+          json(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const requestOperation = await readMoneyForwardOperation(request);
+        if (!requestOperation) {
+          json(response, 400, { error: "invalid MoneyForward operation" });
+          return;
+        }
+        try {
+          json(response, 202, await startRun(requestOperation));
+        } catch (err) {
+          if (err instanceof CrawlerAlreadyRunningError) {
+            json(response, 409, err.state);
+            return;
+          }
           throw err;
         }
         return;
