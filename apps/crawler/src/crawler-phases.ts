@@ -53,6 +53,7 @@ export interface CrawlerConfig {
   isHistoryMode: boolean;
   isDebug: boolean;
   isHeaded: boolean;
+  targetMonth?: string;
 }
 
 export interface CrawlerRuntime {
@@ -68,11 +69,11 @@ export interface CategoryDecisionRuntime {
   usage: CategoryDecisionUsage;
 }
 
-export function runLoadPhase(): CrawlerConfig {
+export function runLoadPhase(targetMonth?: string): CrawlerConfig {
   phase("Load");
   loadEnvFile();
 
-  const config = loadCrawlerConfig();
+  const config = loadCrawlerConfig(process.env, existsSync, hasAuthState, targetMonth);
   logCrawlerOptions(config);
   return config;
 }
@@ -89,6 +90,7 @@ export function loadCrawlerConfig(
   env: NodeJS.ProcessEnv = process.env,
   fileExists: (filePath: string) => boolean = existsSync,
   authStateExists: () => boolean = hasAuthState,
+  targetMonth?: string,
 ): CrawlerConfig {
   const skipRefresh = env.SKIP_REFRESH === "true";
   const cleanupGroups = env.CLEANUP_GROUPS === "true";
@@ -106,6 +108,7 @@ export function loadCrawlerConfig(
     isHistoryMode: scrapeMode === "history",
     isDebug: env.DEBUG === "true",
     isHeaded: env.HEADED === "true",
+    targetMonth,
   };
 }
 
@@ -257,7 +260,7 @@ export async function runInstitutionCategoryPhase(page: Page): Promise<Map<strin
 export async function runCashFlowHistoryPhase(
   db: Db,
   page: Page,
-  config: Pick<CrawlerConfig, "isHistoryMode"> & { activeAccountingMonth?: string },
+  config: Pick<CrawlerConfig, "isHistoryMode" | "targetMonth"> & { activeAccountingMonth?: string },
   categoryDecision: CategoryDecisionRuntime = { config: null, usage: { llmCallsUsed: 0 } },
   progress?: CrawlerProgressReporter,
   publishHistory: (months: TransactionPeriodReplacement[]) => Promise<number[]> = async (
@@ -270,13 +273,14 @@ export async function runCashFlowHistoryPhase(
   phase("Cash Flow History");
 
   const now = new Date();
-  const activeAccountingMonth = config.activeAccountingMonth ?? getHistoryMonth(now, 0);
+  const activeAccountingMonth =
+    config.targetMonth ?? config.activeAccountingMonth ?? getHistoryMonth(now, 0);
   const maxMonths = getHistoryMaxMonthsFromAnchor(activeAccountingMonth);
 
   // Always refresh the current and previous periods so transactions posted late by an
   // institution are incorporated. History mode extends that window to the oldest gap.
-  let monthsToFetch = Math.min(2, maxMonths);
-  if (config.isHistoryMode) {
+  let monthsToFetch = config.targetMonth ? 1 : Math.min(2, maxMonths);
+  if (!config.targetMonth && config.isHistoryMode) {
     for (let i = 2; i < maxMonths; i++) {
       const month = getHistoryMonthFromAnchor(activeAccountingMonth, i);
       if (!(await hasCashFlowPeriod(db, month))) {
@@ -313,6 +317,7 @@ export async function runCashFlowHistoryPhase(
   try {
     await switchGroup(page, NO_GROUP_ID);
     const historyResults = await scrapeCashFlowHistory(page, monthsToFetch, {
+      targetMonth: config.targetMonth,
       onMonthStart: async (month) => {
         if (!progress) return;
         if (monthSteps.has(month)) {
@@ -386,7 +391,10 @@ export async function runCashFlowHistoryPhase(
   }
 }
 
-export async function runAnalyticsPhase(db: Db, groupDataList: GroupData[]): Promise<void> {
+export async function runAnalyticsPhase(
+  db: Db,
+  groupDataList: Array<{ group: Pick<GroupData["group"], "id" | "name"> }>,
+): Promise<void> {
   phase("Analytics");
 
   if (groupDataList.length === 0) {

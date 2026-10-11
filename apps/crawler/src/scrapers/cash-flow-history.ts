@@ -451,6 +451,25 @@ async function getDisplayedCashFlowMonth(page: Page): Promise<string> {
   return (await detectMonth(page)).month;
 }
 
+async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
+  const currentMonth = await getDisplayedCashFlowMonth(page);
+  const prevButton = page.locator("button.fc-button-prev, span.fc-button-prev").first();
+  await waitForCashFlowFetchApplied(page, async () => {
+    const [fetchResponse] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/cf/fetch") && res.status() === 200),
+      prevButton.click(),
+    ]);
+    const responseFailure = await fetchResponse.finished();
+    if (responseFailure) throw responseFailure;
+  });
+  const newMonth = await getDisplayedCashFlowMonth(page);
+  if (newMonth === currentMonth) {
+    log(`  No more months available after ${currentMonth}, stopping.`);
+    return false;
+  }
+  return true;
+}
+
 /**
  * 過去N月分の家計簿データを取得
  * UIの前月ボタンをクリックして月を切り替えながら取得
@@ -462,6 +481,7 @@ export async function scrapeCashFlowHistory(
     onMonthStart?: (month: string) => Promise<void> | void;
     onMonthComplete?: (month: string) => Promise<void> | void;
     onMonthFailure?: (month: string, error: unknown) => Promise<void> | void;
+    targetMonth?: string;
   } = {},
 ): Promise<CashFlowHistoryResult[]> {
   log(`Scraping cash flow history for ${monthsToScrape} months...`);
@@ -469,6 +489,23 @@ export async function scrapeCashFlowHistory(
   await page.goto(mfUrls.cashFlow, { waitUntil: "domcontentloaded" });
   // テーブルが表示されるまで待機
   await page.locator("#cf-detail-table").waitFor({ state: "visible", timeout: 10000 });
+
+  if (callbacks.targetMonth) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(callbacks.targetMonth)) {
+      throw new Error("Invalid target cash flow month");
+    }
+    let displayedMonth = await getDisplayedCashFlowMonth(page);
+    while (displayedMonth > callbacks.targetMonth) {
+      if (!(await goToPreviousCashFlowMonth(page))) {
+        throw new Error(`MoneyForward does not have cash flow data for ${callbacks.targetMonth}`);
+      }
+      displayedMonth = await getDisplayedCashFlowMonth(page);
+    }
+    if (displayedMonth !== callbacks.targetMonth) {
+      throw new Error(`MoneyForward does not have cash flow data for ${callbacks.targetMonth}`);
+    }
+    monthsToScrape = 1;
+  }
 
   const results: CashFlowHistoryResult[] = [];
 
@@ -483,25 +520,7 @@ export async function scrapeCashFlowHistory(
       log(`  ${data.month}: ${data.items.length} transactions`);
 
       if (i < monthsToScrape - 1) {
-        const currentMonth = await getDisplayedCashFlowMonth(page);
-        const prevButton = page.locator("button.fc-button-prev, span.fc-button-prev").first();
-
-        // 月が変わるまで待機（CSV linkのURLパラメータで判定）
-        // クリックで /cf/fetch が発火するため、取りこぼさないよう先にリスナーを登録し、
-        // レスポンス到着後にCSV linkの月パラメータが変わったかを確認する
-        await waitForCashFlowFetchApplied(page, async () => {
-          const [fetchResponse] = await Promise.all([
-            page.waitForResponse((res) => res.url().includes("/cf/fetch") && res.status() === 200),
-            prevButton.click(),
-          ]);
-          const responseFailure = await fetchResponse.finished();
-          if (responseFailure) throw responseFailure;
-        });
-
-        // /cf/fetch 後も月が変わらなければ、これ以上データがないことを意味する
-        const newMonth = await getDisplayedCashFlowMonth(page);
-        if (newMonth === currentMonth) {
-          log(`  No more months available after ${currentMonth}, stopping.`);
+        if (!(await goToPreviousCashFlowMonth(page))) {
           await callbacks.onMonthComplete?.(targetMonth);
           break;
         }

@@ -20,7 +20,7 @@ const DEFAULT_HOST = "127.0.0.1";
 
 interface CrawlerTriggerServerOptions {
   getState?: () => Promise<CrawlerRunState>;
-  startRun?: () => Promise<CrawlerRunState>;
+  startRun?: (options?: { month?: string }) => Promise<CrawlerRunState>;
   watchState?: (onChange: () => void, onError: (err: Error) => void) => Promise<() => void>;
 }
 
@@ -42,6 +42,29 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 function methodNotAllowed(response: ServerResponse): void {
   response.writeHead(405, { allow: "GET, POST" });
   response.end();
+}
+
+async function readRunOptions(request: IncomingMessage): Promise<{ month?: string } | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 1024) return null;
+    chunks.push(buffer);
+  }
+  if (size === 0) return {};
+
+  try {
+    const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+    const month = Reflect.get(body, "month");
+    if (month === undefined) return {};
+    if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+    return { month };
+  } catch {
+    return null;
+  }
 }
 
 function hasValidRefreshToken(request: IncomingMessage): boolean {
@@ -192,7 +215,7 @@ async function streamCrawlerState(
   }
 }
 
-export async function startCrawlerRun(): Promise<CrawlerRunState> {
+export async function startCrawlerRun(options: { month?: string } = {}): Promise<CrawlerRunState> {
   const lock = await acquireCrawlerRunLock("manual");
   let progress: Awaited<ReturnType<typeof createCrawlerProgressReporter>>;
   try {
@@ -209,7 +232,7 @@ export async function startCrawlerRun(): Promise<CrawlerRunState> {
   void (async () => {
     try {
       const { runCrawler } = await import("./run.js");
-      await runCrawler(progress);
+      await runCrawler(progress, options);
       await progress.finish("success");
     } catch (err) {
       await recordManualRunFailure(progress);
@@ -271,8 +294,14 @@ export function createCrawlerTriggerServer(options: CrawlerTriggerServerOptions 
           return;
         }
 
+        const options = await readRunOptions(request);
+        if (!options) {
+          json(response, 400, { error: "invalid run options" });
+          return;
+        }
+
         try {
-          json(response, 202, await startRun());
+          json(response, 202, await startRun(options));
         } catch (err) {
           if (err instanceof CrawlerAlreadyRunningError) {
             json(response, 409, err.state);

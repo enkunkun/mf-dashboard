@@ -20,6 +20,9 @@ import { createGroupScope } from "./scrapers/group.js";
 import { notifyWebRefresh } from "./web-refresh.js";
 
 vi.mock("@mf-dashboard/db", () => ({ closeDb: vi.fn<() => void>() }));
+vi.mock("@mf-dashboard/db/queries/groups", () => ({
+  getAllGroups: vi.fn<() => Promise<Array<{ id: string; name: string }>>>(),
+}));
 vi.mock("./crawler-phases.js", () => ({
   handleCrawlerFailure: vi.fn<() => void>(),
   runAnalyticsPhase: vi.fn<() => void>(),
@@ -63,13 +66,23 @@ beforeEach(async () => {
     [Symbol.asyncDispose]: vi.fn<() => Promise<void>>(),
   });
   vi.mocked(runNotificationPhase).mockResolvedValue(null);
+  const { getAllGroups } = await import("@mf-dashboard/db/queries/groups");
+  vi.mocked(getAllGroups).mockResolvedValue([
+    {
+      id: "group-a",
+      name: "Group A",
+      isCurrent: true,
+      lastScrapedAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ]);
   vi.mocked(notifyWebRefresh).mockResolvedValue(undefined);
   vi.mocked(runSavePhase).mockResolvedValue([]);
   vi.mocked(runInstitutionCategoryPhase).mockResolvedValue(new Map([["account-a", "銀行"]]));
   vi.mocked(runCashFlowHistoryPhase).mockImplementation(
     async (_db, _page, _config, _categoryDecision, _progress, publishHistory) => {
-      if (!publishHistory) throw new Error("publishHistory is required");
-      await publishHistory([]);
+      if (publishHistory) await publishHistory([]);
     },
   );
   vi.mocked(runScrapePhase).mockImplementation(async (_page, _config, progress) => {
@@ -110,6 +123,44 @@ afterEach(async () => {
 });
 
 describe("runCrawler progress", () => {
+  test("指定月の再取り込みは全口座スクレイプをせず対象月と分析だけ更新する", async () => {
+    vi.mocked(runLoadPhase).mockReturnValueOnce({
+      skipRefresh: false,
+      cleanupGroups: false,
+      authState: "configured",
+      dbPath: "/tmp/demo.db",
+      dbExists: true,
+      scrapeMode: "month",
+      isHistoryMode: false,
+      isDebug: false,
+      isHeaded: false,
+      targetMonth: "2025-07",
+    });
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "targeted.json"), {
+      id: "run-targeted",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await runCrawler(progress, { month: "2025-07" });
+
+    expect(runCashFlowHistoryPhase).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ targetMonth: "2025-07" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(runScrapePhase).not.toHaveBeenCalled();
+    expect(runSavePhase).not.toHaveBeenCalled();
+    expect(runInstitutionCategoryPhase).not.toHaveBeenCalled();
+    expect(runAnalyticsPhase).toHaveBeenCalledWith(expect.anything(), [
+      {
+        group: expect.objectContaining({ id: "group-a", name: "Group A" }),
+      },
+    ]);
+  });
+
   test("認証失敗時はスクレイプを開始しない", async () => {
     const authError = new Error("Login failed");
     vi.mocked(runAuthPhase).mockRejectedValueOnce(authError);
