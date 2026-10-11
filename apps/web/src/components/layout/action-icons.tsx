@@ -61,6 +61,7 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
   const pendingWasRunningRef = useRef(false);
   const previousRunIdRef = useRef<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [state, setState] = useState<CrawlerRefreshButtonState>({
     ...unavailableCrawlerRefreshStatus,
     isPending: true,
@@ -69,7 +70,7 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
   const applyStatus = useCallback(
     (nextStatus: CrawlerRefreshStatus) => {
       setState({ ...nextStatus, isPending: false });
-      if (!nextStatus.running && nextStatus.latestRun?.runStatus !== "failed") {
+      if (!startError && !nextStatus.running && nextStatus.latestRun?.runStatus !== "failed") {
         setPopoverOpen(false);
       }
       if (nextStatus.available && wasRunningRef.current && !nextStatus.running) {
@@ -79,7 +80,7 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
         wasRunningRef.current = nextStatus.running;
       }
     },
-    [router],
+    [router, startError],
   );
 
   useEffect(() => {
@@ -126,7 +127,8 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
     pendingWasRunningRef.current = false;
     previousRunIdRef.current = state.latestRun?.runId ?? null;
     wasRunningRef.current = true;
-    setPopoverOpen(false);
+    setStartError(null);
+    setPopoverOpen(true);
     setState((prev) => ({
       ...prev,
       running: true,
@@ -140,11 +142,14 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
 
       if (!res.ok && res.status !== 409) {
         setState({ ...statusBeforeRefresh, isPending: false });
+        setStartError("同期を開始できませんでした。接続を確認して再試行してください。");
+        setPopoverOpen(true);
         return;
       }
 
       const nextStatus = parseCrawlerRefreshStatus(body, true);
       const runningStatus = nextStatus.running ? nextStatus : { ...nextStatus, running: true };
+      setStartError(null);
       wasRunningRef.current = true;
       setState({
         ...runningStatus,
@@ -152,6 +157,8 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
       });
     } catch {
       setState({ ...statusBeforeRefresh, isPending: false });
+      setStartError("同期を開始できませんでした。接続を確認して再試行してください。");
+      setPopoverOpen(true);
     } finally {
       startRefreshInFlightRef.current = false;
       const pendingStatus = pendingStatusRef.current as CrawlerRefreshStatus | null;
@@ -166,13 +173,14 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
       pendingWasRunningRef.current = false;
       previousRunIdRef.current = null;
       if (pendingStatus && shouldApplyPendingStatus) {
+        setStartError(null);
         applyStatus(pendingStatus);
       }
     }
   }
 
   const isFailed = !state.running && state.latestRun?.runStatus === "failed";
-  const showsTimeline = state.running || isFailed;
+  const showsTimeline = state.running || isFailed || startError !== null;
   const isDisabled = state.isPending || !state.available;
 
   function handlePopoverOpenChange(open: boolean) {
@@ -185,10 +193,15 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
 
   let title = state.available ? "金融機関データを更新" : "更新サービス未接続";
   let ariaLabel = title;
-  if (state.running) {
-    title = state.startedAt
-      ? `同期タイムラインを表示（開始 ${formatDateTime(state.startedAt)}）`
-      : "同期タイムラインを表示";
+  if (startError) {
+    title = "同期の開始に失敗しました";
+    ariaLabel = title;
+  } else if (state.running) {
+    title = state.isPending
+      ? "同期を開始しています"
+      : state.startedAt
+        ? `同期タイムラインを表示（開始 ${formatDateTime(state.startedAt)}）`
+        : "同期タイムラインを表示";
     ariaLabel = "同期タイムラインを表示";
   } else if (isFailed) {
     title = "同期失敗の詳細を表示";
@@ -219,11 +232,17 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
           />
         </PopoverTrigger>
         <PopoverContent
-          ariaLabel={isFailed ? "同期失敗の詳細" : "同期タイムライン"}
+          ariaLabel={
+            startError ? "同期の開始エラー" : isFailed ? "同期失敗の詳細" : "同期タイムライン"
+          }
           align="end"
           className="h-[min(32rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-sm overflow-y-auto"
         >
-          <SyncTimelinePopover state={state} onRetry={() => void startRefresh()} />
+          <SyncTimelinePopover
+            state={state}
+            startError={startError}
+            onRetry={() => void startRefresh()}
+          />
         </PopoverContent>
       </Popover>
     </>
@@ -241,9 +260,11 @@ const stepStatusPresentation: Record<CrawlerRunStepStatus, { label: string; clas
 
 function SyncTimelinePopover({
   state,
+  startError,
   onRetry,
 }: {
-  state: CrawlerRefreshStatus;
+  state: CrawlerRefreshButtonState;
+  startError: string | null;
   onRetry: () => void;
 }) {
   const run = state.running && state.latestRun?.runStatus !== "running" ? null : state.latestRun;
@@ -276,11 +297,22 @@ function SyncTimelinePopover({
 
       <div className="mt-5 space-y-5 text-sm">
         <section aria-label="タイムライン">
-          {run && run.timeline.length > 0 ? (
+          {startError ? (
+            <div role="alert" className="mt-2 space-y-3">
+              <p className="text-destructive">{startError}</p>
+              <div className="flex justify-end">
+                <Button onClick={onRetry}>再試行</Button>
+              </div>
+            </div>
+          ) : run && run.timeline.length > 0 ? (
             <TimelineList
               items={run.timeline}
               currentTimelineItemId={run.current?.timelineItemId ?? null}
             />
+          ) : state.isPending ? (
+            <p role="status" aria-live="polite" className="mt-2 text-muted-foreground">
+              同期の開始を受け付けました。進捗を確認しています…
+            </p>
           ) : (
             <p className="mt-2 text-muted-foreground">タイムラインはまだありません。</p>
           )}

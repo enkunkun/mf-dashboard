@@ -211,6 +211,41 @@ describe("ActionIcons", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("shows immediate feedback and prevents repeated starts while the request is pending", async () => {
+    let resolvePost: ((response: Response) => void) | undefined;
+    vi.mocked(global.fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolvePost = resolve;
+      }),
+    );
+    render(<ActionIcons variant="header" />);
+    await emitStatus({ running: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "金融機関データを更新" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("同期の開始を受け付けました");
+    const pendingButton = screen.getByRole("button", { name: "同期タイムラインを表示" });
+    expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
+    expect(pendingButton.getAttribute("title")).toBe("同期を開始しています");
+    fireEvent.click(pendingButton);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolvePost?.(jsonResponse({ available: true, running: true }, 202));
+    });
+  });
+
+  it("shows a visible retry when the refresh request cannot be started", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503));
+    render(<ActionIcons variant="header" />);
+    await emitStatus({ running: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "金融機関データを更新" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("同期を開始できませんでした");
+    expect(screen.getByRole("button", { name: "再試行" })).toBeTruthy();
+  });
+
   it("applies a terminal status received while starting a refresh", async () => {
     let resolvePost: ((response: Response) => void) | undefined;
     vi.mocked(global.fetch).mockReturnValueOnce(
@@ -267,13 +302,14 @@ describe("ActionIcons", () => {
       expect(global.fetch).toHaveBeenCalledWith("/api/crawler/refresh/", { method: "POST" }),
     );
     // Under full-suite load, React may commit the failed POST recovery after the fetch resolves.
-    // Wait for that recovery before sending the SSE event that reconciles the ambiguous request.
-    expect(await screen.findByRole("button", { name: "金融機関データを更新" })).toBeTruthy();
+    // The failed start remains visible even if a later idle status arrives.
+    expect(await screen.findByRole("button", { name: "同期の開始に失敗しました" })).toBeTruthy();
 
     await emitStatus({ running: false });
 
     expect(refreshMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "金融機関データを更新" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "同期の開始に失敗しました" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeTruthy();
   });
 
   it("preserves buffered running and terminal statuses when the refresh POST fails", async () => {

@@ -218,6 +218,22 @@ describe("/api/crawler/refresh/", () => {
     );
   });
 
+  it("accepts same-origin browser POSTs when the reverse proxy rewrites the request URL", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(jsonResponse({ running: true }, 202));
+
+    const res = await POST(
+      new Request("http://web:8765/api/crawler/refresh/", {
+        method: "POST",
+        headers: {
+          origin: "https://dashboard.example.com",
+          "sec-fetch-site": "same-origin",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(202);
+  });
+
   it("rejects a crawler run from a cross-site origin", async () => {
     const res = await POST(sameOriginPostRequest({ origin: "https://attacker.example" }));
 
