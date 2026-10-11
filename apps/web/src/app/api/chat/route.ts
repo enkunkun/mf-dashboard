@@ -1,4 +1,5 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import { getAgentObservabilityInstrumentation } from "@mf-dashboard/analytics/agent-observability";
 import { financeChartSchema, type FinanceChart } from "@mf-dashboard/analytics/chat/chart";
 import { createFinanceChatTools } from "@mf-dashboard/analytics/chat/tools";
 import { getModel, isLLMEnabled } from "@mf-dashboard/analytics/config";
@@ -287,23 +288,46 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const tools = createFinanceChatTools(db, group.id);
     const modelInputMessages = getTrustedModelMessages(validation.data, group.id);
+    const firstUserMessage = validation.data.find((message) => message.role === "user");
+    const conversationId = firstUserMessage?.id ?? randomUUID();
+    const instrumentation = await getAgentObservabilityInstrumentation();
+    const {
+      prepareStep: agentPrepareStep,
+      onChunk: agentOnChunk,
+      onError: agentOnError,
+      onAbort: agentOnAbort,
+      ...telemetryHooks
+    } = instrumentation?.streamTextHooks({ conversationId }) ?? {};
+    void agentPrepareStep;
     const assistantCharts: FinanceChart[] = [];
     let assistantText = "";
     const result = streamText({
+      ...telemetryHooks,
       abortSignal: requestSignal,
       experimental_transform: smoothStream(),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       model,
-      onAbort: releaseChatSlot,
       onChunk: ({ chunk }) => {
+        void agentOnChunk?.({ chunk });
         if (chunk.type === "text-delta") assistantText += chunk.text;
         if (chunk.type === "tool-result" && chunk.toolName === "presentChart") {
           const chart = financeChartSchema.safeParse(chunk.output);
           if (chart.success) assistantCharts.push(chart.data);
         }
       },
-      onError: releaseChatSlot,
+      onError: agentOnError
+        ? (event) => {
+            void agentOnError(event);
+            releaseChatSlot();
+          }
+        : releaseChatSlot,
       onFinish: releaseChatSlot,
+      onAbort: agentOnAbort
+        ? (event) => {
+            void agentOnAbort(event);
+            releaseChatSlot();
+          }
+        : releaseChatSlot,
       prepareStep: ({ stepNumber }) =>
         stepNumber === MAX_GENERATION_STEPS - 1 ? { toolChoice: "none" } : undefined,
       system: getSystemPrompt(),

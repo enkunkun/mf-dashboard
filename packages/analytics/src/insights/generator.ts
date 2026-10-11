@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   getJstTodayIsoDate,
   getJstYearMonthKey,
@@ -6,6 +7,7 @@ import {
 import type { Db } from "@mf-dashboard/db";
 import { generateText, Output, stepCountIs } from "ai";
 import { z } from "zod";
+import { getAgentObservabilityInstrumentation } from "../agent-observability.js";
 import { getModel } from "../config.js";
 import type { AnalyticsInsights } from "../types.js";
 import { createAnalysisTools } from "./analysis-tools.js";
@@ -187,9 +189,17 @@ export async function generateInsights(db: Db, groupId: string): Promise<Analyti
     .replaceAll("${currentMonth}", currentMonth)
     .replaceAll("${latestConfirmedMonth}", latestConfirmedMonth)
     .replaceAll("${previousMonth}", previousMonth);
+  const instrumentation = await getAgentObservabilityInstrumentation();
+  const conversationId = randomUUID();
+  const createTelemetryHooks = () => {
+    const { prepareStep: _prepareStep, ...hooks } =
+      instrumentation?.generateTextHooks({ conversationId }) ?? {};
+    return hooks;
+  };
 
   // Stage 1: Data collection + analysis memo
   const stage1 = await generateText({
+    ...createTelemetryHooks(),
     model: getModel(),
     tools: allTools,
     stopWhen: stepCountIs(10),
@@ -206,6 +216,7 @@ export async function generateInsights(db: Db, groupId: string): Promise<Analyti
 
   // Stage 2: Structured insight generation from memo
   const stage2 = await generateText({
+    ...createTelemetryHooks(),
     model: getModel(),
     output: Output.object({ schema: insightsSchema }),
     system: STAGE2_SYSTEM_PROMPT,

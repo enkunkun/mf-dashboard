@@ -303,6 +303,22 @@ docker compose up -d web
 
 回答生成に失敗した場合はチャット内にエラーが表示される。まず3つのAI環境変数、APIキーの権限・利用上限、モデルIDを確認する。家計データが未取得の場合はcrawlerを実行してから再度質問する。
 
+#### Agent Observability
+
+Grafana Cloud Agent ObservabilityへLLM generationを、同じGrafana CloudのOTLP endpointへtrace/metricを送る場合は、デプロイ先の`.env`へ次の値を設定する。API tokenはソース管理へ追加しない。
+
+```dotenv
+AGENTO11Y_ENDPOINT=https://agento11y-prod-ap-northeast-0.grafana.net
+AGENTO11Y_PROTOCOL=http
+AGENTO11Y_AUTH_MODE=basic
+AGENTO11Y_AUTH_TENANT_ID=<instance-id>
+AGENTO11Y_AUTH_TOKEN=<agent-observability-api-token>
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-ap-northeast-0.grafana.net/otlp
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64-tenant-and-token>
+```
+
+`OTEL_EXPORTER_OTLP_HEADERS`は`printf '%s' '<instance-id>:<token>' | base64 | tr -d '\n'`で作成する。これらの環境変数はwebとcrawlerの両コンテナへ渡され、家計AIチャット・財務インサイト・AIカテゴリ分類のgenerationをAgent ObservabilityとOTLPの両方へ送る。無効化する場合は7項目を`.env`から削除し、webとcrawlerを再起動する。
+
 ローカルの SQLite データを MCP クライアントから直接参照する場合は、read-only の MCP サーバーを利用できる。セットアップとクライアント設定は [`apps/mcp/README.md`](../apps/mcp/README.md) を参照する。
 
 ### 未分類取引のカテゴリ決定
