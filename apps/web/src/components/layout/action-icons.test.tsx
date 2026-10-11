@@ -307,7 +307,7 @@ describe("ActionIcons", () => {
 
     await emitStatus({ running: false });
 
-    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "同期の開始に失敗しました" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "再試行" })).toBeTruthy();
   });
@@ -324,7 +324,7 @@ describe("ActionIcons", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "金融機関データを更新" }));
     await emitStatus({ running: true });
-    await emitStatus({ running: false });
+    await emitStatus({ running: false, latestRun: successfulLatestRun });
 
     await act(async () => {
       resolvePost?.(jsonResponse({ error: "upstream response lost" }, 503));
@@ -377,17 +377,17 @@ describe("ActionIcons", () => {
       expect(global.fetch).toHaveBeenCalledWith("/api/crawler/refresh/", { method: "POST" }),
     );
 
-    await emitStatus({ running: false });
+    await emitStatus({ running: false, latestRun: successfulLatestRun });
 
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes the dashboard when a crawler run fails after partial updates", async () => {
+  it("does not refresh the dashboard when a crawler run fails after partial updates", async () => {
     render(<ActionIcons variant="header" />);
     await emitStatus({ running: true });
     await emitStatus({ running: false, latestRun: failedLatestRun });
 
-    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "同期失敗の詳細を表示" })).toBeTruthy();
   });
 
@@ -568,7 +568,7 @@ describe("ActionIcons", () => {
     await act(async () => {
       EventSourceMock.instances.at(-1)?.onerror?.(new Event("error"));
     });
-    await emitStatus({ running: false });
+    await emitStatus({ running: false, latestRun: successfulLatestRun });
 
     expect(refreshMock).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "金融機関データを更新" })).toBeTruthy();
