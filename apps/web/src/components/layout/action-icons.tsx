@@ -73,7 +73,12 @@ function RefreshControl({ iconSize }: { iconSize: string }) {
       if (!startError && !nextStatus.running && nextStatus.latestRun?.runStatus !== "failed") {
         setPopoverOpen(false);
       }
-      if (nextStatus.available && wasRunningRef.current && !nextStatus.running) {
+      if (
+        nextStatus.available &&
+        wasRunningRef.current &&
+        !nextStatus.running &&
+        nextStatus.latestRun?.runStatus === "success"
+      ) {
         router.refresh();
       }
       if (nextStatus.available) {

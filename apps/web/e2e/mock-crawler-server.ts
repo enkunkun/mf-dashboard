@@ -147,7 +147,7 @@ const server = createServer((request, response) => {
   }
 
   if (url.pathname === "/__test/state") {
-    writeJson(response, 200, { runCount, state });
+    writeJson(response, 200, { runCount, state, eventClients: clients.size });
     return;
   }
 
