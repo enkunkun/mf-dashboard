@@ -41,7 +41,6 @@ export function createRootMetadata(
       default: "MoneyForward Me Dashboard",
     },
     description: DASHBOARD_DESCRIPTION,
-    manifest: withBasePath("/manifest.webmanifest"),
     icons: {
       apple: withBasePath("/apple-touch-icon.png"),
     },
@@ -70,5 +69,17 @@ export function createRootMetadata(
       description: DASHBOARD_DESCRIPTION,
       images: [withBasePath("/logo.png")],
     },
+  };
+}
+
+export function createManifestLinkProps(
+  environment: Record<string, string | undefined> = process.env,
+) {
+  const basePath = environment.NEXT_PUBLIC_BASE_PATH ?? "";
+
+  return {
+    rel: "manifest" as const,
+    href: `${basePath}/manifest.webmanifest`,
+    crossOrigin: "use-credentials" as const,
   };
 }

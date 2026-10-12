@@ -10,7 +10,7 @@ import { Header } from "../components/layout/header";
 import { Sidebar } from "../components/layout/sidebar";
 import { SidebarProvider } from "../components/layout/sidebar-context";
 import { parseChatSuggestedPrompts } from "../lib/chat-config";
-import { createRootMetadata } from "../lib/metadata";
+import { createManifestLinkProps, createRootMetadata } from "../lib/metadata";
 import { waitForRuntimeData } from "../lib/runtime-rendering";
 
 export const metadata = createRootMetadata();
@@ -74,6 +74,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
 
   return (
     <html lang="ja">
+      <head>
+        <link {...createManifestLinkProps()} />
+      </head>
       <body className={bodyClassName}>{content}</body>
     </html>
   );
