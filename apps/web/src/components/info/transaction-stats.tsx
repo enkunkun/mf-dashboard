@@ -10,8 +10,11 @@ interface TransactionStatsProps {
 }
 
 export async function TransactionStats({ year, groupId }: TransactionStatsProps) {
-  const allTransactions = await getTransactions({ groupId });
-  const transactions = allTransactions.filter((t) => t.date.substring(0, 4) === year);
+  const transactions = await getTransactions({
+    groupId,
+    startDate: `${year}-01-01`,
+    endDate: `${year}-12-31`,
+  });
 
   // Filter out excluded transactions and transfers (for expense)
   const validTransactions = transactions.filter(

@@ -2,6 +2,7 @@ import { getMonthlySummaries } from "@mf-dashboard/db";
 import { mfUrls } from "@mf-dashboard/meta/urls";
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import type { ReactNode } from "react";
 import { BankCashFlowForecast } from "../../components/info/bank-cashflow-forecast";
 import { MonthlyIncomeExpenseChart } from "../../components/info/monthly-income-expense-chart";
 import { MonthlySummaryCard } from "../../components/info/monthly-summary-card";
@@ -10,13 +11,24 @@ import { TransactionTable } from "../../components/info/transaction-table/transa
 import { PageLayout } from "../../components/layout/page-layout";
 import { AmountDisplay } from "../../components/ui/amount-display";
 import { CFTabProvider, CFTabSelector, CFTabContent } from "./_components/cf-tabs";
+import type { CFTab } from "./cf-tab";
+import { resolveCFTab } from "./cf-tab";
 
 export const metadata: Metadata = {
   title: "収支",
 };
 
-export async function CFContent({ groupId }: { groupId?: string }) {
-  const monthlySummaries = await getMonthlySummaries({ groupId });
+export async function CFContent({
+  groupId,
+  activeTab = "summary",
+  includeBothTabs = false,
+}: {
+  groupId?: string;
+  activeTab?: CFTab;
+  includeBothTabs?: boolean;
+}) {
+  const showSummary = includeBothTabs || activeTab === "summary";
+  const monthlySummaries = showSummary ? await getMonthlySummaries({ groupId }) : [];
 
   // Group summaries by year
   const summariesByYear = monthlySummaries.reduce(
@@ -34,7 +46,7 @@ export async function CFContent({ groupId }: { groupId?: string }) {
   // Build href with groupId prefix
   const cfPath = groupId ? `/${groupId}/cf` : "/cf";
 
-  const summaryContent = (
+  const summaryContent: ReactNode = showSummary ? (
     <>
       {/* Monthly chart */}
       <MonthlyIncomeExpenseChart groupId={groupId} />
@@ -93,9 +105,12 @@ export async function CFContent({ groupId }: { groupId?: string }) {
           );
         })}
     </>
-  );
+  ) : null;
 
-  const transactionsContent = <TransactionTable groupId={groupId} showYearSelector />;
+  const transactionsContent: ReactNode =
+    includeBothTabs || activeTab === "transactions" ? (
+      <TransactionTable groupId={groupId} showYearSelector />
+    ) : null;
 
   return (
     <Suspense>
@@ -108,6 +123,11 @@ export async function CFContent({ groupId }: { groupId?: string }) {
   );
 }
 
-export default function PLPage() {
-  return <CFContent />;
+export default async function PLPage({ searchParams }: PageProps<"/cf">) {
+  if (process.env.DEMO_MODE === "true") {
+    return <CFContent includeBothTabs />;
+  }
+
+  const { tab } = await searchParams;
+  return <CFContent activeTab={resolveCFTab(tab)} />;
 }
