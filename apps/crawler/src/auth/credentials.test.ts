@@ -23,7 +23,7 @@ vi.spyOn(process, "exit").mockImplementation(() => {
   throw new Error("process.exit called");
 });
 
-import { getCredentials, getOTP, _resetOpClient } from "./credentials.js";
+import { getCredentials, getOTP, resolveAiApiKey, _resetOpClient } from "./credentials.js";
 
 describe("credentials", () => {
   const originalEnv = process.env;
@@ -37,6 +37,9 @@ describe("credentials", () => {
       OP_VAULT: "test-vault",
       OP_ITEM: "test-item",
       OP_TOTP_FIELD: "totp",
+      OP_AI_API_KEY_ITEM: "test-ai-item",
+      OP_AI_API_KEY_FIELD: "credential",
+      AI_API_KEY: "stale-key",
     };
   });
 
@@ -96,6 +99,25 @@ describe("credentials", () => {
       mockResolve.mockResolvedValue("");
 
       await expect(getOTP()).rejects.toThrow("OTP の取得に失敗しました");
+    });
+  });
+
+  describe("resolveAiApiKey", () => {
+    test("loads the configured API key field from 1Password", async () => {
+      mockResolve.mockResolvedValue("resolved-api-key");
+
+      await expect(resolveAiApiKey()).resolves.toBe(true);
+
+      expect(process.env.AI_API_KEY).toBe("resolved-api-key");
+      expect(mockResolve).toHaveBeenCalledWith("op://test-vault/test-ai-item/credential");
+    });
+
+    test("disables LLM when the 1Password lookup fails", async () => {
+      mockResolve.mockRejectedValue(new Error("secret unavailable"));
+
+      await expect(resolveAiApiKey()).resolves.toBe(false);
+
+      expect(process.env.AI_API_KEY).toBeUndefined();
     });
   });
 });
