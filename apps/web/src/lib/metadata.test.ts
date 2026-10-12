@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMetadataBase, createRootMetadata } from "./metadata";
+import { createManifestLinkProps, createMetadataBase, createRootMetadata } from "./metadata";
 
 describe("createMetadataBase", () => {
   it("uses the public demo URL for demo builds", () => {
@@ -58,7 +58,11 @@ describe("createRootMetadata", () => {
       NEXT_PUBLIC_BASE_PATH: "/dashboard",
     });
 
-    expect(metadata.manifest).toBe("/dashboard/manifest.webmanifest");
+    expect(createManifestLinkProps({ NEXT_PUBLIC_BASE_PATH: "/dashboard" })).toEqual({
+      rel: "manifest",
+      href: "/dashboard/manifest.webmanifest",
+      crossOrigin: "use-credentials",
+    });
     expect(metadata.icons).toEqual({ apple: "/dashboard/apple-touch-icon.png" });
     expect(metadata.openGraph?.images).toEqual([
       {
