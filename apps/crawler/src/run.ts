@@ -1,5 +1,6 @@
 import { closeDb } from "@mf-dashboard/db";
 import { getAllGroups } from "@mf-dashboard/db/queries/groups";
+import { resolveAiApiKey } from "./auth/credentials.js";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
 import {
   handleCrawlerFailure,
@@ -45,6 +46,7 @@ export async function runCrawler(
     operation?: import("./moneyforward/operations.js").MoneyForwardOperation;
   } = {},
 ): Promise<void> {
+  await resolveAiApiKey();
   const config = runLoadPhase(options.month);
   let runtime: CrawlerRuntime | null = null;
 
