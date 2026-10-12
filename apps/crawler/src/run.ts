@@ -1,5 +1,6 @@
 import { closeDb } from "@mf-dashboard/db";
 import { getAllGroups } from "@mf-dashboard/db/queries/groups";
+import { resolveAiApiKey } from "./auth/credentials.js";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
 import {
   handleCrawlerFailure,
@@ -22,7 +23,6 @@ import {
 } from "./crawler-progress.js";
 import { error, info, warn } from "./logger.js";
 import { applyMoneyForwardOperation } from "./moneyforward/operations.js";
-import { resolveAiApiKey } from "./auth/credentials.js";
 import { createGroupScope, NO_GROUP_ID, switchGroup } from "./scrapers/group.js";
 import { notifyWebRefresh } from "./web-refresh.js";
 
