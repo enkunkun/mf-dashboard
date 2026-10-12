@@ -1,4 +1,4 @@
-import { desc, eq, and, gte, sql, inArray, or } from "drizzle-orm";
+import { desc, eq, and, gte, lte, sql, inArray, or } from "drizzle-orm";
 import { getDb, type Db, schema } from "../index";
 import { resolveGroupId, getAccountIdsForGroup } from "../shared/group-filter";
 import { transformTransferToIncome } from "../shared/transfer";
@@ -8,6 +8,7 @@ export async function getTransactions(
     limit?: number;
     groupId?: string;
     startDate?: string;
+    endDate?: string;
     includeTransferTargetAccounts?: boolean;
   },
   db: Db = getDb(),
@@ -45,6 +46,7 @@ export async function getTransactions(
             )
           : inArray(schema.transactions.accountId, accountIds),
         options?.startDate ? gte(schema.transactions.date, options.startDate) : undefined,
+        options?.endDate ? lte(schema.transactions.date, options.endDate) : undefined,
       ),
     )
     .orderBy(desc(schema.transactions.date));

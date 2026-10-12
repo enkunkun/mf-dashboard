@@ -134,6 +134,16 @@ describe("getTransactions", () => {
     expect(result[0].date).toBe("2025-04-15");
   });
 
+  it("endDateを指定した場合は対象日以前に制限される", async () => {
+    const accountId = await createTestAccount("Bank A");
+    await createTransaction({ accountId, date: "2025-04-15", amount: 1000, type: "expense" });
+    await createTransaction({ accountId, date: "2025-05-01", amount: 2000, type: "expense" });
+
+    const result = await getTransactions({ endDate: "2025-04-30" }, db);
+
+    expect(result.map((transaction) => transaction.date)).toEqual(["2025-04-15"]);
+  });
+
   it("指定時は振替先だけがグループ内の取引も返す", async () => {
     const bankAccountId = await createTestAccount("Bank A");
     const now = new Date().toISOString();
