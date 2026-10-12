@@ -21,11 +21,13 @@ export const metadata: Metadata = {
 export async function CFContent({
   groupId,
   activeTab = "summary",
+  includeBothTabs = false,
 }: {
   groupId?: string;
   activeTab?: CFTab;
+  includeBothTabs?: boolean;
 }) {
-  const showSummary = activeTab === "summary";
+  const showSummary = includeBothTabs || activeTab === "summary";
   const monthlySummaries = showSummary ? await getMonthlySummaries({ groupId }) : [];
 
   // Group summaries by year
@@ -106,7 +108,9 @@ export async function CFContent({
   ) : null;
 
   const transactionsContent: ReactNode =
-    activeTab === "transactions" ? <TransactionTable groupId={groupId} showYearSelector /> : null;
+    includeBothTabs || activeTab === "transactions" ? (
+      <TransactionTable groupId={groupId} showYearSelector />
+    ) : null;
 
   return (
     <Suspense>
@@ -120,6 +124,10 @@ export async function CFContent({
 }
 
 export default async function PLPage({ searchParams }: PageProps<"/cf">) {
+  if (process.env.DEMO_MODE === "true") {
+    return <CFContent includeBothTabs />;
+  }
+
   const { tab } = await searchParams;
   return <CFContent activeTab={resolveCFTab(tab)} />;
 }
