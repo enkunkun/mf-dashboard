@@ -73,6 +73,26 @@ export async function getOTP(): Promise<string> {
   return otp;
 }
 
+export async function resolveAiApiKey(): Promise<boolean> {
+  const item = process.env.OP_AI_API_KEY_ITEM || "";
+  const field = process.env.OP_AI_API_KEY_FIELD || "credential";
+  if (!item) return Boolean(process.env.AI_API_KEY);
+
+  const vault = process.env.OP_VAULT || "";
+  try {
+    const client = await getOpClient();
+    const apiKey = await client.secrets.resolve(`op://${vault}/${item}/${field}`);
+    if (!apiKey) throw new Error("Secret is empty");
+    process.env.AI_API_KEY = apiKey;
+    debug("AI API key を1Passwordから取得しました");
+    return true;
+  } catch {
+    error("1PasswordからAI API keyを取得できませんでした");
+    delete process.env.AI_API_KEY;
+    return false;
+  }
+}
+
 /**
  * テスト用: クライアントをリセット
  */

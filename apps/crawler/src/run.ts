@@ -22,6 +22,7 @@ import {
 } from "./crawler-progress.js";
 import { error, info, warn } from "./logger.js";
 import { applyMoneyForwardOperation } from "./moneyforward/operations.js";
+import { resolveAiApiKey } from "./auth/credentials.js";
 import { createGroupScope, NO_GROUP_ID, switchGroup } from "./scrapers/group.js";
 import { notifyWebRefresh } from "./web-refresh.js";
 
@@ -45,6 +46,7 @@ export async function runCrawler(
     operation?: import("./moneyforward/operations.js").MoneyForwardOperation;
   } = {},
 ): Promise<void> {
+  await resolveAiApiKey();
   const config = runLoadPhase(options.month);
   let runtime: CrawlerRuntime | null = null;
 
