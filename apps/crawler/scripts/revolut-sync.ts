@@ -1,7 +1,7 @@
-import { chromium } from "playwright";
-import path from "node:path";
 import fs from "node:fs";
-import { login } from "../src/auth/login.js";
+import path from "node:path";
+import { chromium } from "playwright";
+import { loginWithAuthState } from "../src/auth/login.js";
 import { createBrowserContext } from "../src/browser/context.js";
 import { getCsrfToken } from "../src/hooks/helpers.js";
 
@@ -71,27 +71,32 @@ async function calculateTotalJpyBalance(wallet: WalletData): Promise<number> {
 async function fetchRevolutData(): Promise<{ txs: RevolutTx[]; totalBalanceJpy: number | null }> {
   console.log("1. Revolutを起動中（必要に応じてTouch IDでロック解除してください）...");
 
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: false,
-    channel: "chrome",
-    viewport: { width: 1280, height: 800 },
-    args: ["--disable-blink-features=AutomationControlled"],
-  }).catch(async () => {
-    console.warn("Chrome起動リトライ中...");
-    return chromium.launchPersistentContext(userDataDir, {
+  const context = await chromium
+    .launchPersistentContext(userDataDir, {
       headless: false,
+      channel: "chrome",
       viewport: { width: 1280, height: 800 },
       args: ["--disable-blink-features=AutomationControlled"],
+    })
+    .catch(async () => {
+      console.warn("Chrome起動リトライ中...");
+      return chromium.launchPersistentContext(userDataDir, {
+        headless: false,
+        channel: "chrome",
+        viewport: { width: 1280, height: 800 },
+        args: ["--disable-blink-features=AutomationControlled"],
+      });
     });
-  });
 
   const page = context.pages()[0] || (await context.newPage());
   let capturedTxs: RevolutTx[] = [];
   let capturedWallet: WalletData | null = null;
+  let txApiSeen = false;
 
   page.on("response", async (res) => {
     const url = res.url();
     if (url.includes("/api/retail/user/current/transactions/last")) {
+      txApiSeen = true;
       try {
         const json = await res.json();
         if (Array.isArray(json) && json.length > 0) {
@@ -119,10 +124,17 @@ async function fetchRevolutData(): Promise<{ txs: RevolutTx[]; totalBalanceJpy: 
   await page.goto("https://app.revolut.com/home", { timeout: 30000 }).catch(() => {});
 
   process.stdout.write("認証・データ受信待機中 ");
-  for (let i = 0; i < 45; i++) {
+  const MAX_WAIT_SECONDS = 180;
+  let lastLoggedUrl = page.url();
+  for (let i = 0; i < MAX_WAIT_SECONDS; i++) {
     if (capturedTxs.length > 0 && capturedWallet !== null) {
       process.stdout.write(" [完了]\n");
       break;
+    }
+    const currentUrl = page.url();
+    if (currentUrl !== lastLoggedUrl) {
+      lastLoggedUrl = currentUrl;
+      process.stdout.write(`\n  [${i}s] 遷移: ${currentUrl.slice(0, 120)}\n  `);
     }
     process.stdout.write(".");
     await page.waitForTimeout(1000);
@@ -130,6 +142,14 @@ async function fetchRevolutData(): Promise<{ txs: RevolutTx[]; totalBalanceJpy: 
   console.log("");
 
   await context.close();
+
+  if (!txApiSeen) {
+    throw new Error(
+      `Revolut の明細APIを ${MAX_WAIT_SECONDS} 秒待っても観測できませんでした。` +
+        "ログインが完了していないか、signin から app.revolut.com/home へ戻っていません。" +
+        "古いキャッシュで続行すると誤った残高になるため中止します。",
+    );
+  }
 
   if (capturedTxs.length === 0 && fs.existsSync(rawTxsPath)) {
     console.warn("最新明細APIがスキップされたため、キャッシュデータを使用します。");
@@ -173,7 +193,7 @@ async function syncToMoneyForward(txs: RevolutTx[], totalBalanceJpy: number | nu
   const browser = await chromium.launch({ headless: true });
   const context = await createBrowserContext(browser, { useAuthState: true });
   const page = await context.newPage();
-  await login(page);
+  await loginWithAuthState(page, context);
 
   // 1. 未同期明細の登録
   if (targetTxs.length > 0) {
@@ -260,7 +280,9 @@ async function syncToMoneyForward(txs: RevolutTx[], totalBalanceJpy: number | nu
 
   // 2. 口座残高を最新のRevolut円換算残高へ自動修正
   if (totalBalanceJpy !== null) {
-    console.log(`3. MF上のRevolut残高を最新の円換算残高 (¥${totalBalanceJpy.toLocaleString()}) に調整中...`);
+    console.log(
+      `3. MF上のRevolut残高を最新の円換算残高 (¥${totalBalanceJpy.toLocaleString()}) に調整中...`,
+    );
     const manualUrl = `https://moneyforward.com/accounts/show_manual/${REVOLUT_ACCOUNT_HASH}`;
     await page.goto(manualUrl);
 
@@ -283,7 +305,9 @@ async function syncToMoneyForward(txs: RevolutTx[], totalBalanceJpy: number | nu
     await page.waitForTimeout(4000);
 
     const bodyText = await page.locator("body").innerText();
-    const balanceLine = bodyText.split("\n").find((l) => l.includes("残高：") || (l.includes("残高") && l.includes("円")));
+    const balanceLine = bodyText
+      .split("\n")
+      .find((l) => l.includes("残高：") || (l.includes("残高") && l.includes("円")));
     console.log(`残高同期完了: ${balanceLine?.trim() || `¥${totalBalanceJpy.toLocaleString()}`}`);
   }
 
