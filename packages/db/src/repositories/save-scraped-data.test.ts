@@ -7,7 +7,10 @@ import * as schema from "../schema/schema";
 import { closeTestDb, createTestDb, resetTestDb } from "../test-helpers";
 import type { ScrapedData } from "../types";
 import {
+  DEFAULT_LIABILITY_OVERRIDE_CATEGORY,
+  isLiabilityAccountOverride,
   normalizePortfolioCategories,
+  parseLiabilityAccountNames,
   saveGroupOnlyData,
   saveScrapedData,
   saveScrapedDataBatch,
@@ -770,5 +773,61 @@ describe("saveScrapedData", () => {
     ]);
     await expect(db.select().from(schema.transactions).all()).resolves.toEqual([]);
     await expect(db.select().from(schema.dailySnapshots).all()).resolves.toEqual([]);
+  });
+});
+
+describe("liability account override", () => {
+  test("parseLiabilityAccountNames はカンマ区切りを Set にする", () => {
+    expect([...parseLiabilityAccountNames("PayPayカード, Foo ,,Bar")]).toEqual([
+      "PayPayカード",
+      "Foo",
+      "Bar",
+    ]);
+    expect([...parseLiabilityAccountNames(undefined)]).toEqual([]);
+  });
+
+  test("isLiabilityAccountOverride は institution / name のどちらでも一致する", () => {
+    const names = new Set(["PayPayカード"]);
+    expect(
+      isLiabilityAccountOverride({ institution: "PayPayカード", name: "PayPayカード" }, names),
+    ).toBe(true);
+    expect(
+      isLiabilityAccountOverride({ institution: "Institution A", name: "PayPayカード" }, names),
+    ).toBe(true);
+    expect(
+      isLiabilityAccountOverride({ institution: "Institution A", name: "Fund A" }, names),
+    ).toBe(false);
+  });
+
+  test("対象口座の保有項目は負債として保存される（額は絶対値）", async () => {
+    const data = createScrapedData();
+    data.portfolio.items[0]!.balance = -93912;
+    process.env.LIABILITY_ACCOUNT_NAMES = "Institution A";
+    try {
+      await saveScrapedData(db, data);
+    } finally {
+      delete process.env.LIABILITY_ACCOUNT_NAMES;
+    }
+
+    const holdings = await db.select().from(schema.holdings).all();
+    expect(holdings).toHaveLength(1);
+    expect(holdings[0]).toMatchObject({
+      name: "Fund A",
+      type: "liability",
+      liabilityCategory: DEFAULT_LIABILITY_OVERRIDE_CATEGORY,
+    });
+
+    const values = await db.select().from(schema.holdingValues).all();
+    expect(values).toHaveLength(1);
+    expect(values[0]!.amount).toBe(93912);
+  });
+
+  test("未設定なら従来どおり資産として保存される", async () => {
+    const data = createScrapedData();
+    await saveScrapedData(db, data);
+
+    const holdings = await db.select().from(schema.holdings).all();
+    expect(holdings).toHaveLength(1);
+    expect(holdings[0]).toMatchObject({ type: "asset" });
   });
 });
