@@ -32,6 +32,22 @@ export async function saveTransaction(
   await upsertById(db, schema.transactions, eq(schema.transactions.mfId, item.mfId), data, data);
 }
 
+export async function updateTransactionCategories(
+  db: DbExecutor,
+  updates: Array<{ mfId: string; category: string; subCategory: string }>,
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  const updatedAt = now();
+  for (const update of updates) {
+    await db
+      .update(schema.transactions)
+      .set({ category: update.category, subCategory: update.subCategory, updatedAt })
+      .where(eq(schema.transactions.mfId, update.mfId))
+      .run();
+  }
+}
+
 /**
  * 指定月にトランザクションが存在するかチェック
  * @param month "2026-01" 形式
