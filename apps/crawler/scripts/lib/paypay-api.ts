@@ -2,13 +2,9 @@
  * PayPay 取引履歴を公式アプリの非公開 API から取得する。
  *
  * 実機アプリの UI 自動化を置き換えるためのモジュール。
- * ログインだけは実 Chrome (CDP) が必要（AWS WAF Bot Control のため）。
+ * ログインだけは実 Chrome (CDP) が必要（AWS WAF Bot Control のため）なので、
+ * その部分は `paypay-login.ts` が担う。
  * トークンが手に入れば以降は素の HTTP で `app4.paypay.ne.jp/bff/*` を叩ける。
- *
- * 前提: `~/.local/share/paypay-hook/paypay-api.mjs` で token を取得済みであること。
- *   node paypay-api.mjs login:start
- *   node paypay-api.mjs login:otp <4桁>
- *   node paypay-api.mjs refresh
  *
  * 取得した CSV は `paypay_<from>_<to>.csv` として CSV ディレクトリに置くので、
  * 既存の CSV インポート（scripts/paypay-import.ts）がそのまま読める。
@@ -20,16 +16,19 @@ import path from "node:path";
 /**
  * トークンと CSV の置き場。既定は `~/.local/share/paypay-hook`。
  * 別の場所に置く場合は環境変数 `PAYPAY_DIR` で上書きする。
+ * **このディレクトリはリポジトリに含めない**（トークンと明細が入るため）。
  */
 export const PAYPAY_DIR =
   process.env.PAYPAY_DIR ?? path.join(os.homedir(), ".local", "share", "paypay-hook");
 export const TOKENS_PATH = path.resolve(PAYPAY_DIR, "tokens.json");
+export const LOGIN_STATE_PATH = path.resolve(PAYPAY_DIR, "login-state.json");
 
-const ORIGIN = "https://app4.paypay.ne.jp";
-const CLIENT_ID = "pay2-mobile-app-client";
+export const ORIGIN = "https://app4.paypay.ne.jp";
+export const CLIENT_ID = "pay2-mobile-app-client";
+export const REDIRECT_URI = "paypay://oauth2/callback";
 
 /** アプリの PayPayHttpHeaderFactory と同じヘッダ。Is-Emulator は自己申告できる。 */
-const baseHeaders = (): Record<string, string> => ({
+export const baseHeaders = (): Record<string, string> => ({
   "User-Agent": "PaypayApp/5.69.0 Android17",
   "Client-Type": "PAYPAYAPP",
   "Client-Version": "5.69.0",
@@ -63,7 +62,7 @@ export type Report = {
  * tokens.json の形。expiredAt は accessToken の失効時刻（ISO）。
  * refreshToken は実測では refresh してもローテーションされない（同一値が返る）。
  */
-type Tokens = {
+export type Tokens = {
   accessToken: string;
   refreshToken: string;
   expiredAt?: string;
@@ -74,12 +73,15 @@ type Tokens = {
 
 export function loadTokens(): Tokens {
   if (!fs.existsSync(TOKENS_PATH)) {
-    throw new Error(`${TOKENS_PATH} がありません。先に paypay-api.mjs でログインしてください`);
+    throw new Error(
+      `${TOKENS_PATH} がありません。先に \`npx tsx scripts/paypay-fetch.ts login:start\` でログインしてください`,
+    );
   }
   return JSON.parse(fs.readFileSync(TOKENS_PATH, "utf8")) as Tokens;
 }
 
-function saveTokens(tokens: Tokens): void {
+export function saveTokens(tokens: Tokens): void {
+  fs.mkdirSync(PAYPAY_DIR, { recursive: true });
   fs.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2));
   fs.chmodSync(TOKENS_PATH, 0o600);
 }
