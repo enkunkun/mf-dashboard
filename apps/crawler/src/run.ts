@@ -81,22 +81,20 @@ export async function runCrawler(
       if (!options.categorizeUncategorized || !activeRuntime.categoryDecision.config) {
         throw new Error("All-month uncategorized classification is not configured");
       }
-      const months = (await getAvailableMonths(undefined, activeRuntime.db)).reverse();
-      await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, async () => {
-        for (const { month } of months) {
-          await runCashFlowHistoryPhase(
-            activeRuntime.db,
-            activeRuntime.page,
-            {
-              isHistoryMode: false,
-              targetMonth: month,
-              includeExistingUncategorized: true,
-            },
-            activeRuntime.categoryDecision,
-            progress,
-          );
-        }
-      });
+      const months = await getAvailableMonths(undefined, activeRuntime.db);
+      if (months.length > 0) {
+        await runCashFlowHistoryPhase(
+          activeRuntime.db,
+          activeRuntime.page,
+          {
+            isHistoryMode: false,
+            includeExistingUncategorized: true,
+            monthsToFetch: months.length,
+          },
+          activeRuntime.categoryDecision,
+          progress,
+        );
+      }
       const groups = await getAllGroups(activeRuntime.db);
       await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
         runAnalyticsPhase(
