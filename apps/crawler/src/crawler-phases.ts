@@ -283,9 +283,7 @@ export async function runCashFlowHistoryPhase(
 
   // Always refresh the current and previous periods so transactions posted late by an
   // institution are incorporated. History mode extends that window to the oldest gap.
-  let monthsToFetch = config.targetMonth
-    ? 1
-    : (config.monthsToFetch ?? Math.min(2, maxMonths));
+  let monthsToFetch = config.targetMonth ? 1 : (config.monthsToFetch ?? Math.min(2, maxMonths));
   if (!config.targetMonth && config.isHistoryMode) {
     for (let i = 2; i < maxMonths; i++) {
       const month = getHistoryMonthFromAnchor(activeAccountingMonth, i);
