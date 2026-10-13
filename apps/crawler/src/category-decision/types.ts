@@ -71,6 +71,21 @@ export type LLMCategoryDecider = (
   candidates: CategoryCandidate[],
 ) => Promise<LLMCategoryDecision | null>;
 
+export interface LLMCategoryBatchItem {
+  transaction: TransactionForCategorization;
+  candidates: CategoryCandidate[];
+}
+
+export interface IndexedLLMCategoryDecision extends LLMCategoryDecision {
+  index: number;
+}
+
+export type LLMCategoryBatchDecider = (
+  items: LLMCategoryBatchItem[],
+) => Promise<IndexedLLMCategoryDecision[]>;
+
 export interface CategoryDecisionUsage {
   llmCallsUsed: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
