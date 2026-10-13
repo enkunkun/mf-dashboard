@@ -34,6 +34,31 @@ const DEPOSIT_ASSET_CATEGORY = "預金・現金";
 const CRYPTO_ASSET_CATEGORY = "暗号資産";
 const CRYPTO_INSTITUTION_CATEGORY = "暗号資産・FX・貴金属";
 
+/** 手動口座を負債として扱う上書きの既定カテゴリ */
+export const DEFAULT_LIABILITY_OVERRIDE_CATEGORY = "クレジットカード利用残高";
+
+/**
+ * 負債として扱う口座名の一覧（カンマ区切り）を環境変数から読む。
+ * MF は手動口座を負債にできない（カード区分でも資産扱い・家計簿にも記帳不可）ため、
+ * ダッシュボード側で負債へ補正するための設定。
+ */
+export function parseLiabilityAccountNames(value: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  );
+}
+
+/** 保有項目が負債上書きの対象かどうか */
+export function isLiabilityAccountOverride(
+  item: Pick<PortfolioItem, "institution" | "name">,
+  liabilityAccountNames: ReadonlySet<string>,
+): boolean {
+  return liabilityAccountNames.has(item.institution) || liabilityAccountNames.has(item.name);
+}
+
 function log(...args: unknown[]) {
   if (!isCI) console.log(...args);
 }
@@ -279,6 +304,8 @@ async function saveScrapedDataAtomically(db: DbExecutor, data: ScrapedData): Pro
   const unknownAccountId = unknownAccount.id;
 
   // 8. Save portfolio
+  const liabilityAccountNames = parseLiabilityAccountNames(process.env.LIABILITY_ACCOUNT_NAMES);
+  let liabilityOverrideCount = 0;
   for (const item of data.portfolio.items) {
     const accountId = resolveHoldingAccountId(
       currentAccountIdByMfId,
@@ -286,12 +313,24 @@ async function saveScrapedDataAtomically(db: DbExecutor, data: ScrapedData): Pro
       item,
       unknownAccountId,
     );
+    const amount = Number.isFinite(item.balance) ? item.balance : 0;
+
+    // MF は手動口座を負債にできないため、ダッシュボード側で上書きする
+    if (isLiabilityAccountOverride(item, liabilityAccountNames)) {
+      const holdingId = await createHolding(db, accountId, item.name, "liability", {
+        liabilityCategory: DEFAULT_LIABILITY_OVERRIDE_CATEGORY,
+      });
+      // MF 側は負の資産として持つので、負債額は絶対値で保存する
+      await saveHoldingValue(db, holdingId, snapshotId, { amount: Math.abs(amount) });
+      liabilityOverrideCount += 1;
+      continue;
+    }
+
     const categoryId = await getOrCreateCategory(db, item.type);
     const holdingId = await createHolding(db, accountId, item.name, "asset", {
       categoryId,
       code: item.code,
     });
-    const amount = Number.isFinite(item.balance) ? item.balance : 0;
     await saveHoldingValue(db, holdingId, snapshotId, {
       amount,
       quantity: item.quantity,
@@ -303,6 +342,9 @@ async function saveScrapedDataAtomically(db: DbExecutor, data: ScrapedData): Pro
     });
   }
   log(`  - Portfolio: ${data.portfolio.items.length}`);
+  if (liabilityOverrideCount > 0) {
+    log(`  - Liability overrides: ${liabilityOverrideCount}`);
+  }
 
   // 9. Save liabilities
   for (const liability of data.liabilities.items) {
