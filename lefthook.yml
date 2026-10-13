@@ -1,5 +1,9 @@
 pre-commit:
   commands:
+    # 機密情報・個人情報（特にホーム配下の絶対パス）の混入を止める。
+    # スクリプトが無い環境（他のコントリビュータ）では何もしない。
+    redact:
+      run: '[ -x "$HOME/.ai-shared/hooks/redact-check.sh" ] && bash "$HOME/.ai-shared/hooks/redact-check.sh" {staged_files} || true'
     format:
       glob: "*.{ts,tsx,js,jsx,json,css,yml,yaml,md}"
       run: pnpm oxfmt {staged_files}

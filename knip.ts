@@ -4,6 +4,7 @@ const config: KnipConfig = {
   workspaces: {
     "apps/crawler": {
       ignore: ["src/hooks/helpers.ts"],
+      entry: ["scripts/**/*.ts"],
     },
     "apps/web": {
       entry: ["e2e/mock-crawler-server.ts"],
