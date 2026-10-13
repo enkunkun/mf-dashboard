@@ -6,6 +6,7 @@ import type { Portfolio, PortfolioItem, RegisteredAccounts, ScrapedData } from "
 import { now } from "../utils";
 import {
   upsertAccounts,
+  deactivateAccountsMissingFrom,
   saveAccountStatuses,
   buildAccountIdMap,
   updateAccountCategory,
@@ -201,6 +202,13 @@ async function saveScrapedDataAtomically(db: DbExecutor, data: ScrapedData): Pro
   // 2. Save accounts (バルク処理)
   await upsertAccounts(db, data.registeredAccounts.accounts);
   log(`  - Accounts: ${data.registeredAccounts.accounts.length}`);
+
+  // 2b. MF 側で削除された口座を無効化する
+  const deactivatedAccounts = await deactivateAccountsMissingFrom(
+    db,
+    data.registeredAccounts.accounts.map((account) => account.mfId || account.name),
+  );
+  if (deactivatedAccounts > 0) log(`  - Deactivated accounts: ${deactivatedAccounts}`);
 
   // 3. Build accountIdMap from DB
   const accountIdMap = await buildAccountIdMap(db);

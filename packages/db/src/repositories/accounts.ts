@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db, DbExecutor } from "../index";
 import { schema } from "../index";
 import type { AccountStatus } from "../types";
@@ -122,6 +122,41 @@ export async function upsertAccounts(db: DbExecutor, accounts: AccountStatus[]):
       })
       .run();
   }
+}
+
+/**
+ * 今回の取得に現れなかった口座を無効化する（MF 側で削除された口座の掃除）。
+ *
+ * upsert だけでは消えた口座を検出できないため、取得できた mfId の集合と突き合わせて
+ * 残りを `is_active = 0` にする。次回以降の取得で再び現れれば `upsertAccounts` が
+ * `is_active = 1` に戻すため、誤判定は次回実行で自己修復する。
+ *
+ * @returns 無効化した口座数
+ */
+export async function deactivateAccountsMissingFrom(
+  db: DbExecutor,
+  seenMfIds: readonly string[],
+): Promise<number> {
+  if (seenMfIds.length === 0) return 0;
+
+  const seen = new Set(seenMfIds);
+  const activeAccounts = await db
+    .select({ id: schema.accounts.id, mfId: schema.accounts.mfId })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.isActive, true))
+    .all();
+  const staleIds = activeAccounts
+    .filter((account) => !seen.has(account.mfId))
+    .map((account) => account.id);
+  if (staleIds.length === 0) return 0;
+
+  await db
+    .update(schema.accounts)
+    .set({ isActive: false, updatedAt: now() })
+    .where(and(inArray(schema.accounts.id, staleIds), eq(schema.accounts.isActive, true)))
+    .run();
+
+  return staleIds.length;
 }
 
 /**
