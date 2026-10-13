@@ -21,6 +21,30 @@ const DETAIL_COLUMNS = {
 // Column indices for #monthly_total_table_kakeibo
 export const SUMMARY_COLUMNS = { INCOME: 0, EXPENSE: 2, BALANCE: 4 } as const;
 
+/**
+ * `#cf-detail-table` の 1 セルを、ページ内で 1 度だけ読み取ったスナップショット。
+ * セル単位の要素参照を持たないため、表の再描画で内容が失われることがない。
+ */
+export type CashFlowDetailCell = {
+  text: string;
+  html: string;
+  className: string | null;
+  style: string | null;
+  hasTransferBox: boolean;
+  transferBoxText: string | null;
+  noformSpanText: string | null;
+};
+
+/**
+ * `#cf-detail-table` の 1 行分のスナップショット。
+ * `cells` は `undefined` を含みうる（セルが描画されていない行を表現するため）。
+ */
+export type CashFlowDetailRow = {
+  id: string | null;
+  className: string | null;
+  cells: (CashFlowDetailCell | undefined)[];
+};
+
 const TEXT_TIMEOUT = 1000;
 const SUMMARY_TIMEOUT = 3000;
 const CASH_FLOW_AJAX_STATE = "__mfDashboardCashFlowAjax";
@@ -114,9 +138,37 @@ export async function waitForCashFlowFetchApplied(
   }
 }
 
-async function getText(locator: Locator, timeout = TEXT_TIMEOUT): Promise<string> {
-  const text = await locator.textContent({ timeout }).catch(() => "");
-  return (text ?? "").trim();
+/**
+ * 明細テーブルを 1 回の `page.evaluate` でスナップショットとして読み取る。
+ *
+ * 行ごと・セルごとに locator で読むと、明細が多い月では表の再描画と競合し、
+ * DOM から外れた要素を読んで全セルが空として観測される。その結果
+ * `Incomplete cash flow transaction row` で月次抽出が落ちたり、逆に不完全な
+ * 月次結果で置換してしまう。1 往復で同期的に読み切ることでこの競合を排除する。
+ */
+export async function readCashFlowDetailRows(page: Page): Promise<CashFlowDetailRow[]> {
+  return page.evaluate((): CashFlowDetailRow[] => {
+    const table = document.querySelector("#cf-detail-table");
+    if (!table) throw new Error("Cash flow detail table is unavailable");
+
+    return Array.from(table.querySelectorAll("tbody > tr")).map((row) => ({
+      id: row.getAttribute("id"),
+      className: row.getAttribute("class"),
+      cells: Array.from(row.querySelectorAll(":scope > td")).map((cell) => {
+        const transferBox = cell.querySelector(".transfer_account_box");
+        const noformSpan = cell.querySelector("div.noform span");
+        return {
+          text: (cell.textContent ?? "").trim(),
+          html: cell.innerHTML,
+          className: cell.getAttribute("class"),
+          style: cell.getAttribute("style"),
+          hasTransferBox: transferBox !== null,
+          transferBoxText: transferBox ? (transferBox.textContent ?? "").trim() : null,
+          noformSpanText: noformSpan ? (noformSpan.textContent ?? "").trim() : null,
+        };
+      }),
+    }));
+  });
 }
 
 async function getTextWithFailureSignal(
@@ -141,37 +193,26 @@ async function getOptionalAttribute(locator: Locator, name: string): Promise<str
   return locator.first().getAttribute(name);
 }
 
-async function parseAccountCell(
-  accountCell: Locator,
-): Promise<{ accountFrom?: string; accountTo?: string; hasTransferBox: boolean }> {
-  const transferBox = accountCell.locator(".transfer_account_box");
-  const hasTransferBox = (await transferBox.count()) > 0;
+function parseAccountCell(accountCell: CashFlowDetailCell | undefined): {
+  accountFrom?: string;
+  accountTo?: string;
+  hasTransferBox: boolean;
+} {
+  if (!accountCell) throw incompleteCashFlowRow(["account"]);
 
-  if (hasTransferBox) {
-    const [fullText, toText] = await Promise.all([
-      getTextWithFailureSignal(accountCell),
-      getTextWithFailureSignal(transferBox),
-    ]);
-    if (fullText === null || toText === null) {
-      throw incompleteCashFlowRow(["account"]);
-    }
-    const accountFrom = fullText.replace(toText, "").trim();
+  if (accountCell.hasTransferBox) {
+    const toText = accountCell.transferBoxText ?? "";
+    const accountFrom = accountCell.text.replace(toText, "").trim();
     return {
-      hasTransferBox,
+      hasTransferBox: true,
       accountFrom: accountFrom || undefined,
       accountTo: toText || undefined,
     };
   }
 
-  const noformSpan = accountCell.locator("div.noform span");
-  const hasNoformSpan = (await noformSpan.count()) > 0;
-  const accountFrom = hasNoformSpan
-    ? await getTextWithFailureSignal(noformSpan.first())
-    : await getTextWithFailureSignal(accountCell);
-  if (accountFrom === null) throw incompleteCashFlowRow(["account"]);
-
+  const accountFrom = accountCell.noformSpanText ?? accountCell.text;
   return {
-    hasTransferBox,
+    hasTransferBox: false,
     accountFrom: accountFrom || undefined,
     accountTo: undefined,
   };
@@ -260,51 +301,42 @@ async function detectMonth(
 /**
  * 金額セルからタイプ（収入/支出/振替）を判定
  */
-async function detectTransactionType(
-  amountCell: ReturnType<Page["locator"]>,
+function detectTransactionType(
+  amountCell: CashFlowDetailCell | undefined,
   categoryText: string,
-): Promise<"income" | "expense" | "transfer"> {
+): "income" | "expense" | "transfer" {
   if (categoryText === "") return "transfer";
 
-  // 並列取得
-  const [amountClass, amountStyle, amountHtml] = await Promise.all([
-    amountCell.getAttribute("class"),
-    amountCell.getAttribute("style"),
-    amountCell.innerHTML(),
-  ]);
+  const amountClass = amountCell?.className ?? "";
+  const amountStyle = amountCell?.style ?? "";
+  const amountHtml = amountCell?.html ?? "";
 
   const isIncome =
-    (amountClass || "").includes("plus") ||
-    (amountClass || "").includes("income") ||
-    (amountClass || "").includes("blue") ||
-    (amountStyle || "").includes("blue") ||
-    (amountHtml || "").includes("plus") ||
-    ((amountHtml || "").includes("color") && (amountHtml || "").includes("blue"));
+    amountClass.includes("plus") ||
+    amountClass.includes("income") ||
+    amountClass.includes("blue") ||
+    amountStyle.includes("blue") ||
+    amountHtml.includes("plus") ||
+    (amountHtml.includes("color") && amountHtml.includes("blue"));
 
   return isIncome ? "income" : "expense";
 }
 
 /**
- * 詳細行から取引データをパース
+ * 詳細行のスナップショットから取引データをパース
  */
-export async function parseDetailRow(
-  row: ReturnType<Page["locator"]>,
+export function parseDetailRow(
+  row: CashFlowDetailRow,
   year: number,
   period?: { periodStart: string; periodEnd: string },
-): Promise<CashFlowItem> {
-  const cells = row.locator("td");
+): CashFlowItem {
+  const cellText = (index: number): string | null => row.cells[index]?.text ?? null;
 
-  // グループ1: 基本情報を並列取得
-  const [rowId, rowClass, dateText, description, amountText] = await Promise.all([
-    row.getAttribute("id").catch(() => ""),
-    row.getAttribute("class").catch(() => undefined),
-    getText(cells.nth(DETAIL_COLUMNS.DATE)),
-    getTextWithFailureSignal(cells.nth(DETAIL_COLUMNS.DESCRIPTION)),
-    getText(cells.nth(DETAIL_COLUMNS.AMOUNT)),
-  ]);
-
-  const mfId = rowId?.startsWith("js-transaction-") ? rowId.slice("js-transaction-".length) : "";
-  const date = resolveCashFlowDate(dateText || "", year, period);
+  const mfId = row.id?.startsWith("js-transaction-") ? row.id.slice("js-transaction-".length) : "";
+  const dateText = cellText(DETAIL_COLUMNS.DATE) ?? "";
+  const description = cellText(DETAIL_COLUMNS.DESCRIPTION);
+  const amountText = cellText(DETAIL_COLUMNS.AMOUNT) ?? "";
+  const date = resolveCashFlowDate(dateText, year, period);
   const parsedDate = new Date(`${date}T00:00:00Z`);
   const isValidDate =
     /^\d{4}-\d{2}-\d{2}$/.test(date) &&
@@ -314,30 +346,30 @@ export async function parseDetailRow(
   // A monthly replacement is safe only when every rendered transaction row was extracted.
   const incompleteFields = [
     !mfId ? "id" : null,
-    rowClass === undefined ? "class" : null,
+    row.className === null ? "class" : null,
     !isValidDate ? "date" : null,
     description === null ? "description" : null,
     !isSupportedCashFlowAmount(amountText) ? "amount" : null,
   ].filter((field): field is string => field !== null);
-  if (incompleteFields.length > 0) throw incompleteCashFlowRow(incompleteFields);
+  if (incompleteFields.length > 0) {
+    // どのセルが欠けているかを診断できるよう、行の構造を併記する。
+    throw incompleteCashFlowRow([...incompleteFields, `cells=${row.cells.length}`]);
+  }
 
-  // グループ2: カテゴリ情報を並列取得
-  const [categoryText, subCategoryText] = await Promise.all([
-    getTextWithFailureSignal(cells.nth(DETAIL_COLUMNS.CATEGORY)),
-    getTextWithFailureSignal(cells.nth(DETAIL_COLUMNS.SUB_CATEGORY)),
-  ]);
+  const categoryText = cellText(DETAIL_COLUMNS.CATEGORY);
+  const subCategoryText = cellText(DETAIL_COLUMNS.SUB_CATEGORY);
 
   if (categoryText === null || subCategoryText === null) {
     throw incompleteCashFlowRow(["category"]);
   }
 
-  const { accountFrom, accountTo, hasTransferBox } = await parseAccountCell(
-    cells.nth(DETAIL_COLUMNS.ACCOUNT),
+  const { accountFrom, accountTo, hasTransferBox } = parseAccountCell(
+    row.cells[DETAIL_COLUMNS.ACCOUNT],
   );
 
-  const isExcludedFromCalculation = (rowClass ?? "").includes("mf-grayout");
+  const isExcludedFromCalculation = (row.className ?? "").includes("mf-grayout");
 
-  const type = await detectTransactionType(cells.nth(DETAIL_COLUMNS.AMOUNT), categoryText);
+  const type = detectTransactionType(row.cells[DETAIL_COLUMNS.AMOUNT], categoryText);
   const isTransfer = type === "transfer";
 
   let accountName: string | undefined;
@@ -404,14 +436,10 @@ export async function extractCashFlowFromPage(
   const balance = parseJapaneseNumber(balanceText || "0");
 
   // Parse detail items
-  const detailRows = page.locator("#cf-detail-table tbody > tr");
-  const detailCount = await detailRows.count();
-  await verifyCashFlowRowsComplete(page, detailCount, [totalIncome, totalExpense, balance]);
-  const items: CashFlowItem[] = [];
-
-  for (let i = 0; i < detailCount; i++) {
-    items.push(await parseDetailRow(detailRows.nth(i), year, { periodStart, periodEnd }));
-  }
+  // 表の再描画と競合しないよう、行数ぶんのスナップショットを 1 往復で読み切ってから解析する。
+  const detailRows = await readCashFlowDetailRows(page);
+  await verifyCashFlowRowsComplete(page, detailRows.length, [totalIncome, totalExpense, balance]);
+  const items = detailRows.map((row) => parseDetailRow(row, year, { periodStart, periodEnd }));
 
   return {
     month,
