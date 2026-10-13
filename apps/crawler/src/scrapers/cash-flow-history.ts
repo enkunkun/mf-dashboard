@@ -47,6 +47,7 @@ export type CashFlowDetailRow = {
 
 const TEXT_TIMEOUT = 1000;
 const SUMMARY_TIMEOUT = 3000;
+const CASH_FLOW_FETCH_TIMEOUT = 30_000;
 const CASH_FLOW_AJAX_STATE = "__mfDashboardCashFlowAjax";
 const CASH_FLOW_AMOUNT_PATTERN =
   /^(?:(?:[+\-−▲][¥$]?)|(?:[¥$][+\-−▲]?))?(?:\d{1,3}(?:,\d{3})+|\d+)(?:円)?$/;
@@ -484,7 +485,10 @@ async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
   const prevButton = page.locator("button.fc-button-prev, span.fc-button-prev").first();
   await waitForCashFlowFetchApplied(page, async () => {
     const [fetchResponse] = await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/cf/fetch") && res.status() === 200),
+      page.waitForResponse(
+        (res) => res.url().includes("/cf/fetch") && res.status() === 200,
+        { timeout: CASH_FLOW_FETCH_TIMEOUT },
+      ),
       prevButton.click(),
     ]);
     const responseFailure = await fetchResponse.finished();

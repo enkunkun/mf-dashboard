@@ -162,20 +162,11 @@ describe("runCrawler progress", () => {
 
     await runCrawler(progress, { allMonths: true, categorizeUncategorized: true });
 
-    expect(runCashFlowHistoryPhase).toHaveBeenCalledTimes(2);
-    expect(runCashFlowHistoryPhase).toHaveBeenNthCalledWith(
-      1,
+    expect(runCashFlowHistoryPhase).toHaveBeenCalledOnce();
+    expect(runCashFlowHistoryPhase).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ targetMonth: "2026-09", includeExistingUncategorized: true }),
-      expect.anything(),
-      expect.anything(),
-    );
-    expect(runCashFlowHistoryPhase).toHaveBeenNthCalledWith(
-      2,
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ targetMonth: "2026-08", includeExistingUncategorized: true }),
+      expect.objectContaining({ monthsToFetch: 2, includeExistingUncategorized: true }),
       expect.anything(),
       expect.anything(),
     );
