@@ -18,6 +18,9 @@
     "dev:prod": "tsx src/server.ts",
     "serve": "tsx src/server.ts",
     "start": "tsx src/index.ts",
+    "sync:revolut": "tsx --env-file=../../.env scripts/revolut-sync.ts",
+    "sync:revolut-csv": "tsx --env-file=../../.env scripts/sync-revolut-csv.ts",
+    "status:revolut": "tsx scripts/revolut-status.ts",
     "test": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",
     "typecheck": "tsc --noEmit"
