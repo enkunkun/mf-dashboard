@@ -165,6 +165,34 @@ describe("/api/crawler/refresh/", () => {
     );
   });
 
+  it("forwards a request to classify uncategorized transactions across all months", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(jsonResponse({ running: true }, 202));
+
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ allMonths: true, categorizeUncategorized: true }),
+      ),
+    );
+
+    expect(res.status).toBe(202);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({ allMonths: true, categorizeUncategorized: true }),
+    );
+  });
+
+  it("requires categorization to be enabled for an all-month request", async () => {
+    const res = await POST(
+      sameOriginPostRequest(
+        { "content-type": "application/json" },
+        JSON.stringify({ allMonths: true }),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid requested month before calling the crawler", async () => {
     const res = await POST(
       sameOriginPostRequest(

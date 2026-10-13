@@ -93,6 +93,34 @@ describe("crawler trigger server", () => {
     await expect(res.json()).resolves.toEqual(idleState);
   });
 
+  test("starts all-month uncategorized classification", async () => {
+    const startRun = vi.fn(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ allMonths: true, categorizeUncategorized: true }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({ allMonths: true, categorizeUncategorized: true });
+  });
+
+  test("rejects an all-month request without uncategorized classification", async () => {
+    const startRun = vi.fn(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ allMonths: true }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   test.each(["/status", "/events"])("rejects unauthenticated reads from %s", async (path) => {
     const getState = vi.fn<() => Promise<CrawlerRunState>>(async () => idleState);
     const baseUrl = await listen(createCrawlerTriggerServer({ getState }));

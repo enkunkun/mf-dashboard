@@ -1,4 +1,4 @@
-import { closeDb } from "@mf-dashboard/db";
+import { closeDb, getAvailableMonths } from "@mf-dashboard/db";
 import { getAllGroups } from "@mf-dashboard/db/queries/groups";
 import { resolveAiApiKey } from "./auth/credentials.js";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
@@ -42,6 +42,7 @@ export async function runCrawler(
   progress: CrawlerProgressReporter,
   options: {
     month?: string;
+    allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: import("./moneyforward/operations.js").MoneyForwardOperation;
   } = {},
@@ -74,6 +75,48 @@ export async function runCrawler(
         },
         { metadata: { month: config.targetMonth } },
       );
+    }
+
+    if (options.allMonths) {
+      if (!options.categorizeUncategorized || !activeRuntime.categoryDecision.config) {
+        throw new Error("All-month uncategorized classification is not configured");
+      }
+      const months = (await getAvailableMonths(undefined, activeRuntime.db)).reverse();
+      await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, async () => {
+        for (const { month } of months) {
+          await runCashFlowHistoryPhase(
+            activeRuntime.db,
+            activeRuntime.page,
+            {
+              isHistoryMode: false,
+              targetMonth: month,
+              includeExistingUncategorized: true,
+            },
+            activeRuntime.categoryDecision,
+            progress,
+          );
+        }
+      });
+      const groups = await getAllGroups(activeRuntime.db);
+      await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
+        runAnalyticsPhase(
+          activeRuntime.db,
+          groups.map((group) => ({ group })),
+        ),
+      );
+      const webRefreshStep = await progress.startStep(CRAWLER_STEPS.webCacheRefresh);
+      try {
+        await notifyWebRefresh();
+        await progress.completeStep(webRefreshStep);
+      } catch (err) {
+        await progress.warnStep(
+          webRefreshStep,
+          normalizeCrawlerError(err, "web_cache_refresh_failed"),
+        );
+        error("Failed to refresh web cache:", err);
+      }
+      info(`Reclassified uncategorized transactions across ${months.length} months`);
+      return;
     }
 
     if (config.targetMonth) {

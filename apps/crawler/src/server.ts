@@ -23,6 +23,7 @@ interface CrawlerTriggerServerOptions {
   getState?: () => Promise<CrawlerRunState>;
   startRun?: (options?: {
     month?: string;
+    allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: MoneyForwardOperation;
   }) => Promise<CrawlerRunState>;
@@ -51,7 +52,7 @@ function methodNotAllowed(response: ServerResponse): void {
 
 async function readRunOptions(
   request: IncomingMessage,
-): Promise<{ month?: string; categorizeUncategorized?: boolean } | null> {
+): Promise<{ month?: string; allMonths?: boolean; categorizeUncategorized?: boolean } | null> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -66,7 +67,14 @@ async function readRunOptions(
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
     const month = Reflect.get(body, "month");
+    const allMonths = Reflect.get(body, "allMonths");
     const categorizeUncategorized = Reflect.get(body, "categorizeUncategorized");
+    if (allMonths !== undefined && allMonths !== true) return null;
+    if (allMonths === true) {
+      return month === undefined && categorizeUncategorized === true
+        ? { allMonths: true, categorizeUncategorized: true }
+        : null;
+    }
     if (month === undefined) return categorizeUncategorized === undefined ? {} : null;
     if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
     if (categorizeUncategorized !== undefined && typeof categorizeUncategorized !== "boolean") {
@@ -265,6 +273,7 @@ async function streamCrawlerState(
 export async function startCrawlerRun(
   options: {
     month?: string;
+    allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: MoneyForwardOperation;
   } = {},
