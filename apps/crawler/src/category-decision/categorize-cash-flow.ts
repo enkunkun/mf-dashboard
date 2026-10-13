@@ -1,4 +1,4 @@
-import { generateCategoryDecisionWithLLM } from "@mf-dashboard/analytics/categorization";
+import { generateCategoryDecisionsWithLLM } from "@mf-dashboard/analytics/categorization";
 import type { Db } from "@mf-dashboard/db";
 import { findExistingTransactionMfIds } from "@mf-dashboard/db/repository/transactions";
 import type { CashFlowItem, CashFlowSummary } from "@mf-dashboard/db/types";
@@ -111,10 +111,10 @@ export async function categorizeCashFlowMonth(options: {
       candidates,
       usage,
       warn,
-      llmDecider: async (transaction, candidateList) =>
-        generateCategoryDecisionWithLLM({
-          transaction,
-          candidates: candidateList,
+      llmBatchDecider: (items) =>
+        generateCategoryDecisionsWithLLM(items, ({ cacheReadTokens, cacheWriteTokens }) => {
+          usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + cacheReadTokens;
+          usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + cacheWriteTokens;
         }),
     });
     const decisions = await engine.decideMany(targets);

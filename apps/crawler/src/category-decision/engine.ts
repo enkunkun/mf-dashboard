@@ -3,6 +3,7 @@ import type {
   CategoryDecision,
   CategoryDecisionUsage,
   LLMCategoryDecision,
+  LLMCategoryBatchDecider,
   LLMCategoryDecider,
   NormalizedCategoryDecisionConfig,
   ResolvedCategoryDecision,
@@ -13,6 +14,7 @@ interface CategoryDecisionEngineOptions {
   config: NormalizedCategoryDecisionConfig;
   candidates: CategoryCandidate[];
   llmDecider?: LLMCategoryDecider;
+  llmBatchDecider?: LLMCategoryBatchDecider;
   warn?: (...args: unknown[]) => void;
   usage?: CategoryDecisionUsage;
 }
@@ -83,9 +85,11 @@ function ruleMatches(
 }
 
 export class CategoryDecisionEngine {
+  static readonly #batchSize = 20;
   readonly #config: NormalizedCategoryDecisionConfig;
   readonly #candidates: CategoryCandidate[];
   readonly #llmDecider: LLMCategoryDecider | undefined;
+  readonly #llmBatchDecider: LLMCategoryBatchDecider | undefined;
   readonly #warn: (...args: unknown[]) => void;
   readonly #usage: CategoryDecisionUsage;
 
@@ -93,6 +97,7 @@ export class CategoryDecisionEngine {
     this.#config = options.config;
     this.#candidates = options.candidates;
     this.#llmDecider = options.llmDecider;
+    this.#llmBatchDecider = options.llmBatchDecider;
     this.#warn = options.warn ?? (() => {});
     this.#usage = options.usage ?? { llmCallsUsed: 0 };
   }
@@ -100,12 +105,64 @@ export class CategoryDecisionEngine {
   async decideMany(
     transactions: TransactionForCategorization[],
   ): Promise<ResolvedCategoryDecision[]> {
+    if (this.#llmBatchDecider) return this.#decideManyInBatches(transactions);
+
     const results: ResolvedCategoryDecision[] = [];
 
     for (const transaction of transactions) {
       const decision = await this.#decide(transaction);
       if (decision) {
         results.push(decision);
+      }
+    }
+
+    return results;
+  }
+
+  async #decideManyInBatches(
+    transactions: TransactionForCategorization[],
+  ): Promise<ResolvedCategoryDecision[]> {
+    const results: ResolvedCategoryDecision[] = [];
+    const targets: Array<{
+      transaction: TransactionForCategorization;
+      candidates: CategoryCandidate[];
+    }> = [];
+
+    for (const transaction of transactions) {
+      const ruleDecision = this.#decideByRule(transaction);
+      if (ruleDecision) {
+        results.push(ruleDecision);
+        continue;
+      }
+      if (!this.#config.llm.enabled) continue;
+
+      const matchingCandidates = this.#candidates.filter((candidate) =>
+        candidateTypeMatches(candidate, transaction),
+      );
+      if (matchingCandidates.length > 0) {
+        targets.push({ transaction, candidates: this.#candidates });
+      }
+    }
+
+    for (let offset = 0; offset < targets.length; offset += CategoryDecisionEngine.#batchSize) {
+      if (this.#usage.llmCallsUsed >= this.#config.llm.maxPerRun) break;
+      const batch = targets.slice(offset, offset + CategoryDecisionEngine.#batchSize);
+      this.#usage.llmCallsUsed += 1;
+
+      try {
+        const decisions = await this.#llmBatchDecider!(batch);
+        const seenIndexes = new Set<number>();
+        for (const decision of decisions) {
+          if (seenIndexes.has(decision.index)) continue;
+          seenIndexes.add(decision.index);
+          const target = batch[decision.index];
+          if (!target || decision.confidence < this.#config.llm.minConfidence) continue;
+
+          const resolved = this.#resolveLLMDecision(target.transaction, decision);
+          if (resolved) results.push(resolved);
+        }
+      } catch {
+        this.#warn("LLM category decision failed (code: LLM_REQUEST_FAILED).");
       }
     }
 

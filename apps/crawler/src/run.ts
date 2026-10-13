@@ -81,6 +81,16 @@ export async function runCrawler(
       if (!options.categorizeUncategorized || !activeRuntime.categoryDecision.config) {
         throw new Error("All-month uncategorized classification is not configured");
       }
+      const bulkCategoryDecision = {
+        ...activeRuntime.categoryDecision,
+        config: {
+          ...activeRuntime.categoryDecision.config,
+          llm: {
+            ...activeRuntime.categoryDecision.config.llm,
+            maxPerRun: Number.MAX_SAFE_INTEGER,
+          },
+        },
+      };
       const months = await getAvailableMonths(undefined, activeRuntime.db);
       if (months.length > 0) {
         await runCashFlowHistoryPhase(
@@ -91,7 +101,7 @@ export async function runCrawler(
             includeExistingUncategorized: true,
             monthsToFetch: months.length,
           },
-          activeRuntime.categoryDecision,
+          bulkCategoryDecision,
           progress,
         );
       }
@@ -114,6 +124,9 @@ export async function runCrawler(
         error("Failed to refresh web cache:", err);
       }
       info(`Reclassified uncategorized transactions across ${months.length} months`);
+      info(
+        `AI prompt cache tokens: read=${activeRuntime.categoryDecision.usage.cacheReadTokens ?? 0}, write=${activeRuntime.categoryDecision.usage.cacheWriteTokens ?? 0}`,
+      );
       return;
     }
 
