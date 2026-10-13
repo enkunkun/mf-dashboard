@@ -2,6 +2,8 @@ import type { Locator, Page } from "playwright";
 import { describe, expect, test, vi } from "vitest";
 import {
   buildMonthRange,
+  type CashFlowDetailCell,
+  type CashFlowDetailRow,
   extractCashFlowFromPage,
   isSupportedCashFlowAmount,
   parseDetailRow,
@@ -10,6 +12,56 @@ import {
   scrapeCashFlowHistory,
   verifyCashFlowRowsComplete,
 } from "./cash-flow-history.js";
+
+const makeDetailCell = (
+  text: string,
+  extra: Omit<Partial<CashFlowDetailCell>, "text"> = {},
+): CashFlowDetailCell => ({
+  text,
+  html: "",
+  className: null,
+  style: null,
+  hasTransferBox: false,
+  transferBoxText: null,
+  noformSpanText: null,
+  ...extra,
+});
+
+/**
+ * `readCashFlowDetailRows` が返すスナップショットを組み立てる。
+ * `length` より後ろの列と `skip` の列は「描画されていないセル」として undefined になる。
+ */
+const makeDetailRow = (
+  columns: Record<number, string | Partial<CashFlowDetailCell>>,
+  options: {
+    id?: string | null;
+    className?: string | null;
+    length?: number;
+    skip?: number[];
+  } = {},
+): CashFlowDetailRow => {
+  const length = options.length ?? 7;
+  const skip = new Set(options.skip ?? []);
+  const cells: (CashFlowDetailCell | undefined)[] = Array.from({ length }, (_, index) => {
+    if (skip.has(index)) return undefined;
+    const spec = columns[index];
+    if (spec === undefined) return makeDetailCell("");
+    return typeof spec === "string" ? makeDetailCell(spec) : makeDetailCell(spec.text ?? "", spec);
+  });
+  return {
+    id: options.id === undefined ? "js-transaction-row-a" : options.id,
+    className: options.className === undefined ? "" : options.className,
+    cells,
+  };
+};
+
+const transactionColumns: Record<number, string> = {
+  1: "07/01",
+  2: "Transaction A",
+  3: "1,000",
+  5: "Category A",
+  6: "Subcategory A",
+};
 
 describe("buildMonthRange", () => {
   test.each([
@@ -148,7 +200,7 @@ describe("scrapeCashFlowHistory", () => {
     } as unknown as Locator;
     const page = {
       goto: vi.fn<() => Promise<null>>().mockResolvedValue(null),
-      evaluate: vi.fn<(callback: unknown, argument: string) => Promise<void>>().mockResolvedValue(),
+      evaluate: vi.fn<() => Promise<CashFlowDetailRow[]>>().mockResolvedValue([]),
       locator: vi.fn<(selector: string) => Locator>().mockImplementation((selector) => {
         if (selector === "#cf-detail-table") return detailTable;
         if (selector === "a[href*='/cf/csv']") return csvLink;
@@ -196,7 +248,7 @@ describe("scrapeCashFlowHistory", () => {
     });
     const page = {
       goto: vi.fn<() => Promise<null>>().mockResolvedValue(null),
-      evaluate: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      evaluate: vi.fn<() => Promise<CashFlowDetailRow[]>>().mockResolvedValue([]),
       waitForFunction: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
       waitForResponse: vi.fn<() => Promise<unknown>>().mockResolvedValue({
         finished: vi
@@ -246,38 +298,22 @@ describe("scrapeCashFlowHistory", () => {
       first: vi.fn<() => Locator>().mockReturnValue(summaryRow),
     } as unknown as Locator;
 
-    const texts = new Map([
-      [1, "07/01"],
-      [2, "Transaction A"],
-      [3, "1,000"],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        return {
-          textContent: vi
-            .fn<() => Promise<string | null>>()
-            .mockResolvedValue(texts.get(index) ?? ""),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const rowWithoutId = {
-      getAttribute: vi.fn<(name: string) => Promise<string | null>>().mockResolvedValue(""),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
-    const detailRows = {
-      count: vi.fn<() => Promise<number>>().mockResolvedValue(1),
-      nth: vi.fn<(index: number) => Locator>().mockReturnValue(rowWithoutId),
-    } as unknown as Locator;
     let missing: Locator;
     missing = {
       first: vi.fn<() => Locator>(() => missing),
       count: vi.fn<() => Promise<number>>().mockResolvedValue(0),
     } as unknown as Locator;
+
     const page = {
+      // 明細行は 1 度の evaluate でまとめて読み取る。ID を持たない行も除外せずそのまま返す。
+      evaluate: vi
+        .fn<() => Promise<CashFlowDetailRow[]>>()
+        .mockResolvedValue([
+          makeDetailRow({ 1: "07/01", 2: "Transaction A", 3: "1,000" }, { id: "" }),
+        ]),
       locator: vi.fn<(selector: string) => Locator>().mockImplementation((selector) => {
         if (selector === ".fc-header-title h2") return monthHeader;
         if (selector === "#monthly_total_table_kakeibo tbody tr") return summaryRows;
-        if (selector === "#cf-detail-table tbody > tr") return detailRows;
         return missing;
       }),
     } as unknown as Page;
@@ -324,247 +360,68 @@ describe("scrapeCashFlowHistory", () => {
 });
 
 describe("parseDetailRow", () => {
-  test("正常に取得した空の内容欄を保持する", async () => {
-    const missingChild = {
-      count: vi.fn<() => Promise<number>>().mockResolvedValue(0),
-    } as unknown as Locator;
-    const accountCell = {
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(missingChild),
-      textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(""),
-    } as unknown as Locator;
-    const texts = new Map([
-      [1, "07/01"],
-      [2, ""],
-      [3, "1,000"],
-      [5, ""],
-      [6, ""],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        if (index === 4) return accountCell;
-        return {
-          textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi
-        .fn<Locator["getAttribute"]>()
-        .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
+  test("正常に取得した空の内容欄を保持する", () => {
+    const row = makeDetailRow({ 1: "07/01", 2: "", 3: "1,000", 5: "", 6: "" });
 
-    await expect(parseDetailRow(row, 2026)).resolves.toMatchObject({ description: "" });
+    expect(parseDetailRow(row, 2026)).toMatchObject({ description: "" });
   });
 
-  test("内容欄の取得に失敗したら月次置換へ進まない", async () => {
-    const texts = new Map([
-      [1, "07/01"],
-      [3, "1,000"],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        return {
-          textContent: vi.fn<Locator["textContent"]>().mockImplementation(async () => {
-            if (index === 2) throw new Error("Detached cell");
-            return texts.get(index) ?? "";
-          }),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi
-        .fn<Locator["getAttribute"]>()
-        .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
+  test("取引IDを取得できない行があれば月次置換へ進まない", () => {
+    const row = makeDetailRow(transactionColumns, { id: "" });
 
-    await expect(parseDetailRow(row, 2026)).rejects.toThrow(
-      "Incomplete cash flow transaction row (description)",
-    );
-  });
-
-  test("必須セルを取得できない行があれば部分的な月次結果を返さない", async () => {
-    const emptyCell = {
-      textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(""),
-    } as unknown as Locator;
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>().mockReturnValue(emptyCell),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi
-        .fn<Locator["getAttribute"]>()
-        .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
-
-    await expect(parseDetailRow(row, 2026)).rejects.toThrow("Incomplete cash flow transaction row");
-  });
-
-  test("取引IDを取得できない行があれば月次置換へ進まない", async () => {
-    const texts = new Map([
-      [1, "2026/07/01"],
-      [2, "Transaction A"],
-      [3, "1,000"],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        return {
-          textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi.fn<Locator["getAttribute"]>().mockResolvedValue(""),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
-
-    await expect(parseDetailRow(row, 2026)).rejects.toThrow("Incomplete cash flow transaction row");
+    expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
   });
 
   test.each(["", "invalid", "02/30"])(
     "日付 %j を有効な日付として取得できない行があれば月次置換へ進まない",
-    async (dateText) => {
-      const texts = new Map([
-        [1, dateText],
-        [2, "Transaction A"],
-        [3, "1,000"],
-      ]);
-      const cells = {
-        nth: vi.fn<(index: number) => Locator>((index) => {
-          return {
-            textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-          } as unknown as Locator;
-        }),
-      } as unknown as Locator;
-      const row = {
-        getAttribute: vi
-          .fn<Locator["getAttribute"]>()
-          .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-        locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-      } as unknown as Locator;
+    (dateText) => {
+      const row = makeDetailRow({ ...transactionColumns, 1: dateText });
 
-      await expect(parseDetailRow(row, 2026)).rejects.toThrow(
-        "Incomplete cash flow transaction row",
-      );
+      expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
     },
   );
 
   test.each(["--", "取得中", "1,23"])(
     "金額 %j を数値として取得できない行があれば月次置換へ進まない",
-    async (amountText) => {
-      const texts = new Map([
-        [1, "2026/07/01"],
-        [2, "Transaction A"],
-        [3, amountText],
-      ]);
-      const cells = {
-        nth: vi.fn<(index: number) => Locator>((index) => {
-          return {
-            textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-          } as unknown as Locator;
-        }),
-      } as unknown as Locator;
-      const row = {
-        getAttribute: vi
-          .fn<Locator["getAttribute"]>()
-          .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-        locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-      } as unknown as Locator;
+    (amountText) => {
+      const row = makeDetailRow({ ...transactionColumns, 3: amountText });
 
-      await expect(parseDetailRow(row, 2026)).rejects.toThrow(
-        "Incomplete cash flow transaction row",
-      );
+      expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
     },
   );
 
-  test.each([5, 6])(
-    "カテゴリ列 %i の取得に失敗した行があれば月次置換へ進まない",
-    async (failedColumn) => {
-      const texts = new Map([
-        [1, "2026/07/01"],
-        [2, "Transaction A"],
-        [3, "1,000"],
-        [5, ""],
-        [6, ""],
-      ]);
-      const cells = {
-        nth: vi.fn<(index: number) => Locator>((index) => {
-          return {
-            textContent: vi.fn<Locator["textContent"]>().mockImplementation(async () => {
-              if (index === failedColumn) throw new Error("Detached cell");
-              return texts.get(index) ?? "";
-            }),
-          } as unknown as Locator;
-        }),
-      } as unknown as Locator;
-      const row = {
-        getAttribute: vi
-          .fn<Locator["getAttribute"]>()
-          .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-        locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-      } as unknown as Locator;
+  test("行classを取得できない行があれば月次置換へ進まない", () => {
+    const row = makeDetailRow(transactionColumns, { className: null });
 
-      await expect(parseDetailRow(row, 2026)).rejects.toThrow(
-        "Incomplete cash flow transaction row",
-      );
-    },
-  );
-
-  test("行classの取得に失敗したら月次置換へ進まない", async () => {
-    const texts = new Map([
-      [1, "2026/07/01"],
-      [2, "Transaction A"],
-      [3, "1,000"],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        return {
-          textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi.fn<Locator["getAttribute"]>().mockImplementation(async (name) => {
-        if (name === "id") return "js-transaction-row-a";
-        throw new Error("Detached row");
-      }),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
-
-    await expect(parseDetailRow(row, 2026)).rejects.toThrow("Incomplete cash flow transaction row");
+    expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
   });
 
-  test("口座セルの取得に失敗したら月次置換へ進まない", async () => {
-    const missingChild = {
-      count: vi.fn<() => Promise<number>>().mockResolvedValue(0),
-    } as unknown as Locator;
-    const accountCell = {
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(missingChild),
-      textContent: vi.fn<Locator["textContent"]>().mockRejectedValue(new Error("Detached cell")),
-    } as unknown as Locator;
-    const texts = new Map([
-      [1, "2026/07/01"],
-      [2, "Transaction A"],
-      [3, "1,000"],
-      [5, "Category A"],
-      [6, "Subcategory A"],
-    ]);
-    const cells = {
-      nth: vi.fn<(index: number) => Locator>((index) => {
-        if (index === 4) return accountCell;
-        return {
-          textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
-        } as unknown as Locator;
-      }),
-    } as unknown as Locator;
-    const row = {
-      getAttribute: vi
-        .fn<Locator["getAttribute"]>()
-        .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
-      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
-    } as unknown as Locator;
+  test("内容欄が描画されていない行があれば月次置換へ進まない", () => {
+    const row = makeDetailRow({ 1: "07/01", 3: "1,000", 5: "", 6: "" }, { length: 2 });
 
-    await expect(parseDetailRow(row, 2026)).rejects.toThrow("Incomplete cash flow transaction row");
+    expect(() => parseDetailRow(row, 2026)).toThrow(
+      "Incomplete cash flow transaction row (description",
+    );
+  });
+
+  test.each([5, 6])(
+    "カテゴリ列 %i が描画されていない行があれば月次置換へ進まない",
+    (missingColumn) => {
+      const row = makeDetailRow(transactionColumns, { length: missingColumn });
+
+      expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
+    },
+  );
+
+  test("口座セルが描画されていない行があれば月次置換へ進まない", () => {
+    const row = makeDetailRow(transactionColumns, { skip: [4] });
+
+    expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
+  });
+
+  test("必須セルを取得できない行があれば部分的な月次結果を返さない", () => {
+    const row = makeDetailRow({});
+
+    expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
   });
 });
