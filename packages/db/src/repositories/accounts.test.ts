@@ -5,6 +5,8 @@ import { createTestDb, resetTestDb, closeTestDb } from "../test-helpers";
 import type { AccountStatus } from "../types";
 import {
   upsertAccount,
+  upsertAccounts,
+  deactivateAccountsMissingFrom,
   saveAccountStatus,
   saveAccountStatuses,
   updateAccountCategory,
@@ -217,5 +219,47 @@ describe("updateAccountCategory", () => {
     const categories = await db.select().from(schema.institutionCategories).all();
     expect(categories).toHaveLength(2);
     expect(categories.map((c) => c.name)).toEqual(expect.arrayContaining(["銀行", "証券"]));
+  });
+});
+
+describe("deactivateAccountsMissingFrom", () => {
+  const account = (mfId: string, name = mfId): AccountStatus => ({
+    mfId,
+    name,
+    type: "自動連携",
+    status: "ok",
+    lastUpdated: "2025-04-01",
+    url: "",
+    totalAssets: 0,
+  });
+
+  test("取得に現れなかった口座だけを無効化する", async () => {
+    await upsertAccounts(db, [account("acc1", "銀行A"), account("acc2", "銀行B")]);
+
+    const deactivated = await deactivateAccountsMissingFrom(db, ["acc1"]);
+
+    expect(deactivated).toBe(1);
+    const rows = await db.select().from(schema.accounts).all();
+    expect(rows.find((row) => row.mfId === "acc1")?.isActive).toBe(true);
+    expect(rows.find((row) => row.mfId === "acc2")?.isActive).toBe(false);
+  });
+
+  test("取得結果が空のときは無効化しない", async () => {
+    await upsertAccounts(db, [account("acc1")]);
+
+    expect(await deactivateAccountsMissingFrom(db, [])).toBe(0);
+    const rows = await db.select().from(schema.accounts).all();
+    expect(rows.every((row) => row.isActive)).toBe(true);
+  });
+
+  test("次の取得で再び現れた口座は有効に戻る", async () => {
+    await upsertAccounts(db, [account("acc1")]);
+    expect(await deactivateAccountsMissingFrom(db, ["acc2"])).toBe(1);
+
+    await upsertAccounts(db, [account("acc1")]);
+
+    const rows = await db.select().from(schema.accounts).all();
+    expect(rows[0].isActive).toBe(true);
+    expect(await deactivateAccountsMissingFrom(db, ["acc1"])).toBe(0);
   });
 });
