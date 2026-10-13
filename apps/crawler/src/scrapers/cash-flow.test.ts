@@ -94,21 +94,18 @@ describe("getCashFlow", () => {
     const summaryRows = {
       first: vi.fn<() => Locator>().mockReturnValue(summaryRow),
     } as unknown as Locator;
-    const detailRows = {
-      count: vi.fn<() => Promise<number>>().mockResolvedValue(0),
-    } as unknown as Locator;
     const locator = vi.fn<(selector: string) => Locator>().mockImplementation((selector) => {
       if (selector === "#cf-detail-table") return detailTable;
       if (selector === ".fc-header-title h2") return monthHeader;
       if (selector === "a[href*='/cf/csv']") return csvLink;
       if (selector === ".fc-button-today") return todayButton;
       if (selector === "#monthly_total_table_kakeibo tbody tr") return summaryRows;
-      if (selector === "#cf-detail-table tbody > tr") return detailRows;
       throw new Error(`Unexpected selector: ${selector}`);
     });
     const page = {
       goto: vi.fn<() => Promise<null>>().mockResolvedValue(null),
       locator,
+      evaluate: vi.fn<() => Promise<unknown>>().mockResolvedValue([]),
     } as unknown as Page;
 
     await expect(getCashFlow(page)).resolves.toMatchObject({
@@ -162,20 +159,24 @@ describe("getCashFlow", () => {
     const summaryRows = {
       first: vi.fn<() => Locator>().mockReturnValue(summaryRow),
     } as unknown as Locator;
-    const detailRows = {
-      count: vi.fn<() => Promise<number>>().mockImplementation(async () => {
-        events.push("detail-read");
-        return 0;
-      }),
-    } as unknown as Locator;
-
     const fetchResponse = {
       finished: vi.fn<Response["finished"]>().mockResolvedValue(null),
     } as unknown as Response;
     const evaluate = vi
-      .fn<(callback: unknown, argument: string) => Promise<void>>()
+      .fn<(callback: unknown, argument: string) => Promise<unknown>>()
       .mockImplementation(async () => {
-        events.push(evaluate.mock.calls.length === 1 ? "ajax-wait-installed" : "ajax-wait-cleaned");
+        const call = evaluate.mock.calls.length;
+        if (call === 1) {
+          events.push("ajax-wait-installed");
+          return undefined;
+        }
+        if (call === 2) {
+          events.push("ajax-wait-cleaned");
+          return undefined;
+        }
+        // 3 回目は明細行のスナップショット読み取り。
+        events.push("detail-read");
+        return [];
       });
     const waitForFunction = vi
       .fn<(callback: unknown, argument: string) => Promise<void>>()
@@ -188,7 +189,6 @@ describe("getCashFlow", () => {
       if (selector === "a[href*='/cf/csv']") return csvLink;
       if (selector === ".fc-button-today") return todayButton;
       if (selector === "#monthly_total_table_kakeibo tbody tr") return summaryRows;
-      if (selector === "#cf-detail-table tbody > tr") return detailRows;
       throw new Error(`Unexpected selector: ${selector}`);
     });
     const page = {
