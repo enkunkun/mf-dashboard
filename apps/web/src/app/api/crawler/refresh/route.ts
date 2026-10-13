@@ -133,6 +133,24 @@ export async function POST(request: Request) {
     typeof body === "object" && body !== null
       ? Reflect.get(body, "categorizeUncategorized")
       : undefined;
+  const allMonths =
+    typeof body === "object" && body !== null ? Reflect.get(body, "allMonths") : undefined;
+  if (allMonths !== undefined && allMonths !== true) {
+    return NextResponse.json({ error: "Invalid all-month categorization option" }, { status: 400 });
+  }
+  if (allMonths === true) {
+    if (month !== undefined || categorizeUncategorized !== true) {
+      return NextResponse.json(
+        { error: "Invalid all-month categorization request" },
+        { status: 400 },
+      );
+    }
+    return proxyCrawlerRequest("/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allMonths: true, categorizeUncategorized: true }),
+    });
+  }
   if (Array.isArray(body) || typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return NextResponse.json({ error: "Invalid month" }, { status: 400 });
   }

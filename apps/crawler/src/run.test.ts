@@ -19,7 +19,10 @@ import { runCrawler } from "./run.js";
 import { createGroupScope } from "./scrapers/group.js";
 import { notifyWebRefresh } from "./web-refresh.js";
 
-vi.mock("@mf-dashboard/db", () => ({ closeDb: vi.fn<() => void>() }));
+vi.mock("@mf-dashboard/db", () => ({
+  closeDb: vi.fn<() => void>(),
+  getAvailableMonths: vi.fn<() => Promise<Array<{ month: string }>>>(),
+}));
 vi.mock("@mf-dashboard/db/queries/groups", () => ({
   getAllGroups: vi.fn<() => Promise<Array<{ id: string; name: string }>>>(),
 }));
@@ -123,6 +126,63 @@ afterEach(async () => {
 });
 
 describe("runCrawler progress", () => {
+  test("分類設定がない場合は全期間の未分類再処理を開始しない", async () => {
+    const progress = await createCrawlerProgressReporter(
+      path.join(tempDir, "all-months-disabled.json"),
+      {
+        id: "run-all-months-disabled",
+        source: "test",
+        startedAt: "2026-07-01T00:00:00.000Z",
+      },
+    );
+
+    await expect(
+      runCrawler(progress, { allMonths: true, categorizeUncategorized: true }),
+    ).rejects.toThrow("All-month uncategorized classification is not configured");
+
+    expect(runCashFlowHistoryPhase).not.toHaveBeenCalled();
+    expect(handleCrawlerFailure).toHaveBeenCalled();
+  });
+
+  test("全期間分類は新しい月から既存の未分類明細を順番に再処理する", async () => {
+    const { getAvailableMonths } = await import("@mf-dashboard/db");
+    vi.mocked(getAvailableMonths).mockResolvedValue([{ month: "2026-08" }, { month: "2026-09" }]);
+    vi.mocked(runSetupPhase).mockResolvedValueOnce({
+      db: {} as never,
+      browser: { close: vi.fn<() => Promise<void>>() } as never,
+      context: {} as never,
+      page: {} as never,
+      categoryDecision: { config: {} as never, usage: { llmCallsUsed: 0 } },
+    });
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "all-months.json"), {
+      id: "run-all-months",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await runCrawler(progress, { allMonths: true, categorizeUncategorized: true });
+
+    expect(runCashFlowHistoryPhase).toHaveBeenCalledTimes(2);
+    expect(runCashFlowHistoryPhase).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ targetMonth: "2026-09", includeExistingUncategorized: true }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(runCashFlowHistoryPhase).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ targetMonth: "2026-08", includeExistingUncategorized: true }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(runScrapePhase).not.toHaveBeenCalled();
+    expect(runAnalyticsPhase).toHaveBeenCalledOnce();
+  });
+
   test("分類設定がない場合は未分類取引の再処理を開始しない", async () => {
     vi.mocked(runLoadPhase).mockReturnValueOnce({
       skipRefresh: false,

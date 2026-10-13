@@ -46,6 +46,29 @@ describe("ClassifyUncategorizedButton", () => {
     expect(await screen.findByText(/分類と再取り込みを開始しました/)).toBeTruthy();
   });
 
+  it("starts classification for all months after explaining the full-period update", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    const fetchMock = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValue(new Response(null, { status: 202 }));
+    render(<ClassifyUncategorizedButton allMonths />);
+
+    fireEvent.click(screen.getByRole("button", { name: "未分類を全期間一括処理" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("データがある全期間"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/crawler/refresh/",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ allMonths: true, categorizeUncategorized: true }),
+        }),
+      ),
+    );
+    expect(await screen.findByText(/分類と再取り込みを開始しました/)).toBeTruthy();
+  });
+
   it("prevents duplicate starts while the request is pending", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.stubGlobal("EventSource", EventSourceMock);

@@ -10,6 +10,7 @@ import { TransactionStats } from "../../components/info/transaction-stats";
 import { TransactionTable } from "../../components/info/transaction-table/transaction-table";
 import { PageLayout } from "../../components/layout/page-layout";
 import { AmountDisplay } from "../../components/ui/amount-display";
+import { ClassifyUncategorizedButton } from "./[month]/_components/classify-uncategorized-button";
 import { CFTabProvider, CFTabSelector, CFTabContent } from "./_components/cf-tabs";
 import type { CFTab } from "./cf-tab";
 import { resolveCFTab } from "./cf-tab";
@@ -115,7 +116,16 @@ export async function CFContent({
   return (
     <Suspense>
       <CFTabProvider>
-        <PageLayout title="収支" href={mfUrls.cashFlow} options={<CFTabSelector />}>
+        <PageLayout
+          title="収支"
+          href={mfUrls.cashFlow}
+          options={
+            <div className="flex flex-wrap items-start justify-end gap-3">
+              {!groupId && <ClassifyUncategorizedButton allMonths />}
+              <CFTabSelector />
+            </div>
+          }
+        >
           <CFTabContent summaryContent={summaryContent} transactionsContent={transactionsContent} />
         </PageLayout>
       </CFTabProvider>
