@@ -9,6 +9,7 @@ import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 import { applyCategoryDecisions } from "./apply.js";
 import { CategoryDecisionEngine, selectTransactionsForCategorization } from "./engine.js";
 import type {
+  CategoryCandidate,
   CategoryDecisionUsage,
   NormalizedCategoryDecisionConfig,
   ResolvedCategoryDecision,
@@ -93,14 +94,27 @@ export async function categorizeCashFlowMonth(options: {
   config: NormalizedCategoryDecisionConfig;
   usage: CategoryDecisionUsage;
   includeExisting?: boolean;
+  candidates?: CategoryCandidate[];
+  onAppliedDecisions?: (decisions: ResolvedCategoryDecision[]) => Promise<void>;
 }): Promise<CashFlowSummary> {
-  const { page, db, cashFlow, config, usage, includeExisting = false } = options;
+  const {
+    page,
+    db,
+    cashFlow,
+    config,
+    usage,
+    includeExisting = false,
+    candidates: providedCandidates,
+    onAppliedDecisions,
+  } = options;
 
   try {
-    const targets = await findCategorizationTargets(db, cashFlow, includeExisting);
+    const targets = includeExisting
+      ? toCategorizationTargets(cashFlow.items, new Set(), true)
+      : await findCategorizationTargets(db, cashFlow, false);
     if (targets.length === 0) return cashFlow;
 
-    const candidates = await scrapeCategoryCandidates(page);
+    const candidates = providedCandidates ?? (await scrapeCategoryCandidates(page));
     if (candidates.length === 0) {
       warn("Skipped category decision because no Money Forward category candidates were found.");
       return cashFlow;
@@ -137,6 +151,8 @@ export async function categorizeCashFlowMonth(options: {
     if (appliedCount === 0) {
       return cashFlow;
     }
+
+    await onAppliedDecisions?.(appliedDecisions);
 
     info(`Applied category decisions: ${appliedCount}/${decisions.length} for ${cashFlow.month}`);
     return applyDecisionsToCashFlow(cashFlow, appliedDecisions);

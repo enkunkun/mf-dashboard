@@ -1,4 +1,4 @@
-import { closeDb, getAvailableMonths } from "@mf-dashboard/db";
+import { closeDb } from "@mf-dashboard/db";
 import { getAllGroups } from "@mf-dashboard/db/queries/groups";
 import { resolveAiApiKey } from "./auth/credentials.js";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
@@ -7,6 +7,7 @@ import {
   runAnalyticsPhase,
   runAuthPhase,
   runCashFlowHistoryPhase,
+  runExistingCashFlowCategorizationPhase,
   runInstitutionCategoryPhase,
   runLoadPhase,
   runNotificationPhase,
@@ -91,20 +92,12 @@ export async function runCrawler(
           },
         },
       };
-      const months = await getAvailableMonths(undefined, activeRuntime.db);
-      if (months.length > 0) {
-        await runCashFlowHistoryPhase(
-          activeRuntime.db,
-          activeRuntime.page,
-          {
-            isHistoryMode: false,
-            includeExistingUncategorized: true,
-            monthsToFetch: months.length,
-          },
-          bulkCategoryDecision,
-          progress,
-        );
-      }
+      const monthCount = await runExistingCashFlowCategorizationPhase(
+        activeRuntime.db,
+        activeRuntime.page,
+        bulkCategoryDecision,
+        progress,
+      );
       const groups = await getAllGroups(activeRuntime.db);
       await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
         runAnalyticsPhase(
@@ -123,7 +116,7 @@ export async function runCrawler(
         );
         error("Failed to refresh web cache:", err);
       }
-      info(`Reclassified uncategorized transactions across ${months.length} months`);
+      info(`Reclassified uncategorized transactions across ${monthCount} months`);
       info(
         `AI prompt cache tokens: read=${activeRuntime.categoryDecision.usage.cacheReadTokens ?? 0}, write=${activeRuntime.categoryDecision.usage.cacheWriteTokens ?? 0}`,
       );

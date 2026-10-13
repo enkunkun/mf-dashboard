@@ -2,6 +2,7 @@ import { desc, eq, and, gte, lte, sql, inArray, or } from "drizzle-orm";
 import { getDb, type Db, schema } from "../index";
 import { resolveGroupId, getAccountIdsForGroup } from "../shared/group-filter";
 import { transformTransferToIncome } from "../shared/transfer";
+import type { CashFlowItem } from "../types";
 
 export async function getTransactions(
   options?: {
@@ -102,6 +103,52 @@ export async function getTransactionsByMonth(
     .all();
 
   return results.map((t) => transformTransferToIncome(t, accountIds));
+}
+
+export async function getTransactionsForCategorizationByMonth(
+  month: string,
+  groupIdParam?: string,
+  db: Db = getDb(),
+): Promise<CashFlowItem[]> {
+  const groupId = await resolveGroupId(db, groupIdParam);
+  if (!groupId) return [];
+
+  const accountIds = await getAccountIdsForGroup(db, groupId);
+  if (accountIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      mfId: schema.transactions.mfId,
+      date: schema.transactions.date,
+      category: schema.transactions.category,
+      subCategory: schema.transactions.subCategory,
+      description: schema.transactions.description,
+      amount: schema.transactions.amount,
+      type: schema.transactions.type,
+      isTransfer: schema.transactions.isTransfer,
+      isExcludedFromCalculation: schema.transactions.isExcludedFromCalculation,
+      transferTarget: schema.transactions.transferTarget,
+      accountName: schema.accounts.name,
+    })
+    .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.accounts.id, schema.transactions.accountId))
+    .where(
+      and(
+        gte(schema.transactions.date, `${month}-01`),
+        lte(schema.transactions.date, `${month}-31`),
+        inArray(schema.transactions.accountId, accountIds),
+      ),
+    )
+    .orderBy(desc(schema.transactions.date))
+    .all();
+
+  return rows.map((row) => ({
+    ...row,
+    description: row.description ?? "",
+    type: row.type as CashFlowItem["type"],
+    accountName: row.accountName ?? undefined,
+    transferTarget: row.transferTarget ?? undefined,
+  }));
 }
 
 export async function getTransactionsByAccountId(

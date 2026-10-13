@@ -2,9 +2,15 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { analyzeFinancialData } from "@mf-dashboard/analytics";
-import { initDb, type Db } from "@mf-dashboard/db";
+import {
+  getAvailableMonths,
+  getTransactionsForCategorizationByMonth,
+  initDb,
+  type Db,
+} from "@mf-dashboard/db";
 import { buildAccountIdMap } from "@mf-dashboard/db/repository/accounts";
 import { saveScrapedDataBatch } from "@mf-dashboard/db/repository/save-scraped-data";
+import { updateTransactionCategories } from "@mf-dashboard/db/repository/transactions";
 import {
   hasCashFlowPeriod,
   saveTransactionsForMonths,
@@ -36,6 +42,7 @@ import { debug, error, info, log, phase, warn } from "./logger.js";
 import { sendFailureNotifications, sendSuccessNotifications } from "./notification.js";
 import { scrapeAllGroups, type GroupData, type ScrapeResult } from "./scraper.js";
 import { scrapeCashFlowHistory } from "./scrapers/cash-flow-history.js";
+import { scrapeCategoryCandidates } from "./scrapers/category-candidates.js";
 import { isNoGroup, switchGroup, NO_GROUP_ID } from "./scrapers/group.js";
 import { scrapeInstitutionCategories } from "./scrapers/institution-categories.js";
 
@@ -394,6 +401,58 @@ export async function runCashFlowHistoryPhase(
     await failRunningMonthSteps(failure);
     throw failure;
   }
+}
+
+export async function runExistingCashFlowCategorizationPhase(
+  db: Db,
+  page: Page,
+  categoryDecision: CategoryDecisionRuntime,
+  progress?: CrawlerProgressReporter,
+): Promise<number> {
+  const months = (await getAvailableMonths(undefined, db)).map(({ month }) => month).reverse();
+  if (months.length === 0) return 0;
+
+  const candidates = await scrapeCategoryCandidates(page);
+  for (const month of months) {
+    const stepId = progress
+      ? await progress.startStep(CRAWLER_STEPS.monthlyCashFlow, { month })
+      : undefined;
+    try {
+      const items = await getTransactionsForCategorizationByMonth(month, undefined, db);
+      await categorizeCashFlowMonth({
+        page,
+        db,
+        cashFlow: {
+          month,
+          totalIncome: 0,
+          totalExpense: 0,
+          balance: 0,
+          items,
+        },
+        config: categoryDecision.config!,
+        usage: categoryDecision.usage,
+        includeExisting: true,
+        candidates,
+        onAppliedDecisions: (decisions) =>
+          updateTransactionCategories(
+            db,
+            decisions.map(({ transaction, candidate }) => ({
+              mfId: transaction.mfId,
+              category: candidate.largeCategoryName,
+              subCategory: candidate.middleCategoryName,
+            })),
+          ),
+      });
+      if (progress && stepId) await progress.completeStep(stepId);
+    } catch (failure) {
+      if (progress && stepId) {
+        await progress.failStep(stepId, normalizeCrawlerError(failure, "monthly_cash_flow_failed"));
+      }
+      throw failure;
+    }
+  }
+
+  return months.length;
 }
 
 export async function runAnalyticsPhase(
