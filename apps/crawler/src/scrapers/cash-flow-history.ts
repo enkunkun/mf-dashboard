@@ -485,10 +485,9 @@ async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
   const prevButton = page.locator("button.fc-button-prev, span.fc-button-prev").first();
   await waitForCashFlowFetchApplied(page, async () => {
     const [fetchResponse] = await Promise.all([
-      page.waitForResponse(
-        (res) => res.url().includes("/cf/fetch") && res.status() === 200,
-        { timeout: CASH_FLOW_FETCH_TIMEOUT },
-      ),
+      page.waitForResponse((res) => res.url().includes("/cf/fetch") && res.status() === 200, {
+        timeout: CASH_FLOW_FETCH_TIMEOUT,
+      }),
       prevButton.click(),
     ]);
     const responseFailure = await fetchResponse.finished();
