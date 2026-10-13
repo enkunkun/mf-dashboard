@@ -52,7 +52,9 @@ function main() {
     minute: "2-digit",
   });
 
-  console.log(`最終同期日時: ${formattedDate} (${diffDays === 0 ? `${diffHours}時間前` : `${diffDays}日前`})`);
+  console.log(
+    `最終同期日時: ${formattedDate} (${diffDays === 0 ? `${diffHours}時間前` : `${diffDays}日前`})`,
+  );
   console.log(`同期済み件数: ${count} 件`);
 
   if (diffDays >= 7) {
