@@ -123,9 +123,10 @@ async function fetchRevolutData(): Promise<{ txs: RevolutTx[]; totalBalanceJpy: 
 
   await page.goto("https://app.revolut.com/home", { timeout: 30000 }).catch(() => {});
 
-  process.stdout.write("認証・データ受信待機中 ");
-  const MAX_WAIT_SECONDS = 180;
+  const MAX_WAIT_SECONDS = Number(process.env.REVOLUT_LOGIN_TIMEOUT_SEC ?? 300);
+  process.stdout.write(`認証・データ受信待機中（最大 ${MAX_WAIT_SECONDS} 秒） `);
   let lastLoggedUrl = page.url();
+  let loginPromptShown = false;
   for (let i = 0; i < MAX_WAIT_SECONDS; i++) {
     if (capturedTxs.length > 0 && capturedWallet !== null) {
       process.stdout.write(" [完了]\n");
@@ -135,6 +136,12 @@ async function fetchRevolutData(): Promise<{ txs: RevolutTx[]; totalBalanceJpy: 
     if (currentUrl !== lastLoggedUrl) {
       lastLoggedUrl = currentUrl;
       process.stdout.write(`\n  [${i}s] 遷移: ${currentUrl.slice(0, 120)}\n  `);
+    }
+    if (!loginPromptShown && currentUrl.includes("sso.revolut.com")) {
+      loginPromptShown = true;
+      process.stdout.write(
+        "\n  >>> ログインが必要です。開いた Chrome のウィンドウで Touch ID / パスキーを完了してください。\n  ",
+      );
     }
     process.stdout.write(".");
     await page.waitForTimeout(1000);
