@@ -13,6 +13,7 @@
     "db:clean": "rm -f data/moneyforward.db data/moneyforward.db-wal data/moneyforward.db-shm",
     "db:dev": "pnpm --filter @mf-dashboard/crawler dev:scrape",
     "sync:revolut": "pnpm --filter @mf-dashboard/crawler sync:revolut",
+    "sync:suica": "pnpm --filter @mf-dashboard/crawler sync:suica",
     "status:revolut": "pnpm --filter @mf-dashboard/crawler status:revolut",
     "test": "turbo test",
     "test:e2e:web": "turbo test:e2e --filter=@mf-dashboard/web",

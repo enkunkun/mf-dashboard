@@ -426,3 +426,38 @@ docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypa
 - 取得は直近35日のローリング窓でレポートを作り直す。取込は取引番号で重複排除する
 - スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
 - ログイン（実 Chrome）はデプロイ先のホストでは行えないため、トークンが失効した場合はローカルで再ログインして1Passwordを更新する
+
+### モバイルSuica 利用履歴の取込
+
+モバイルSuica の SF（電子マネー）利用履歴を取得し、Money Forward ME の手動口座「モバイルSuica」へ取り込む。JRE ID へのログインにパスキーと、CDP 接続した実 Chrome が必要なため、**この工程は Mac 側で行う**（crawler コンテナや cron では実行しない。PayPay のログイン工程と同じ扱い）。
+
+#### 1Password にパスキー項目を作る
+
+`OP_VAULT`と同じ保管庫に、JRE ID のパスキーを保管する項目を作る。
+
+- 項目名: `SUICA_OP_ITEM`に設定する値（既定`JRE ID passkey (Suica)`）
+- 保管庫: `SUICA_OP_VAULT`に設定する値（既定`apps`）
+- フィールド: `credentialId` `privateKey` `rpId` `userHandle` `signCount` `discoverable` `username`（`username`は任意）
+
+パスキーは 1Password CLI（`op`）→ Bitwarden CLI（`BW_SESSION`があるとき）→ Bitwarden エクスポート（`--export`または`JRE_EXPORT`。既定は`~/Downloads`の最新`bitwarden_export_*.json`）の順に探す。
+
+#### 実行（Mac）
+
+永続ブラウザを起動しておく（CDP 9223、プロファイル`data/suica-profile`）。以降のスクリプトはこのブラウザに CDP で接続して再利用する。
+
+```sh
+pnpm --filter @mf-dashboard/crawler exec tsx scripts/suica-browser.ts
+```
+
+別のターミナルで取り込む（既定は取得と表示のみ）。
+
+```sh
+pnpm --filter @mf-dashboard/crawler sync:suica                     # 取得と表示のみ
+pnpm --filter @mf-dashboard/crawler sync:suica -- --apply          # Money Forward へ登録
+pnpm --filter @mf-dashboard/crawler sync:suica -- --reset --apply  # 口座を作り直して全再取込
+```
+
+- 取込先は手動口座「モバイルSuica」（区分は`電子マネー・プリペイド`）。無ければ作成する
+- 履歴は直近190日を、指定日から遡って最大100件ずつ取得する。取得後、明細から現在残高を再計算し Suica 表示の残高と突き合わせる
+- 履歴を表示できるのは 5:00〜翌0:50 のみ。時間外はエラーになる
+- ログイン確認だけなら`scripts/suica-login.ts`、履歴ページの構造調査は`scripts/suica-history.ts`を使う
