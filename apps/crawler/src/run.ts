@@ -1,6 +1,7 @@
 import { closeDb } from "@mf-dashboard/db";
 import { getAllGroups } from "@mf-dashboard/db/queries/groups";
 import { resolveAiApiKey } from "./auth/credentials.js";
+import type { CategoryDecisionUsage } from "./category-decision/types.js";
 import { buildCleanupGroupIds } from "./cleanup-groups.js";
 import {
   handleCrawlerFailure,
@@ -37,6 +38,19 @@ async function disposeGroupScope(
     if (!crawlFailed) throw restoreError;
     warn("Group restoration also failed after the crawl had already failed");
   }
+}
+
+async function reportCategorization(
+  progress: CrawlerProgressReporter,
+  usage: CategoryDecisionUsage,
+): Promise<void> {
+  const applied = usage.appliedDecisions ?? 0;
+  const lowConfidence = usage.skippedLowConfidence ?? 0;
+  const undecided = usage.skippedUndecided ?? 0;
+  info(
+    `Category decisions in this run: applied ${applied}, skipped ${lowConfidence + undecided} (low confidence ${lowConfidence}, undecided ${undecided})`,
+  );
+  await progress.recordCategorization({ applied, skipped: lowConfidence + undecided });
 }
 
 export async function runCrawler(
@@ -99,6 +113,7 @@ export async function runCrawler(
         bulkCategoryDecision,
         progress,
       );
+      await reportCategorization(progress, activeRuntime.categoryDecision.usage);
       const groups = await getAllGroups(activeRuntime.db);
       await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
         runAnalyticsPhase(
@@ -144,6 +159,9 @@ export async function runCrawler(
             progress,
           ),
         );
+      }
+      if (options.categorizeUncategorized) {
+        await reportCategorization(progress, activeRuntime.categoryDecision.usage);
       }
       const groups = await getAllGroups(activeRuntime.db);
       await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>

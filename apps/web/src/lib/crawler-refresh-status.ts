@@ -1,4 +1,5 @@
 import type {
+  CrawlerRunCategorization,
   CrawlerRunCurrent,
   CrawlerRunProgress,
   CrawlerRunReason,
@@ -200,6 +201,14 @@ function readProgress(value: unknown): CrawlerRunProgress | null {
     : null;
 }
 
+function readCategorization(value: unknown): CrawlerRunCategorization | null {
+  return isRecord(value) &&
+    isNonNegativeInteger(value.applied) &&
+    isNonNegativeInteger(value.skipped)
+    ? { applied: value.applied, skipped: value.skipped }
+    : null;
+}
+
 function readLatestRun(value: unknown): CrawlerRunStateSnapshot | null {
   if (
     !isRecord(value) ||
@@ -216,12 +225,15 @@ function readLatestRun(value: unknown): CrawlerRunStateSnapshot | null {
   if (timeline.some((item) => item === null)) {
     return null;
   }
+  // 件数は表示にしか使わないので、形が不正なら欄だけ落として実行状態は読む
+  const categorization = readCategorization(value.categorization);
   const base = {
     version: 1 as const,
     runId: value.runId,
     source: value.source,
     startedAt: value.startedAt,
     timeline: timeline as CrawlerRunTimelineItem[],
+    ...(categorization ? { categorization } : {}),
   };
   const current = value.current === null ? null : readCurrent(value.current);
   const progress = value.progress === null ? null : readProgress(value.progress);

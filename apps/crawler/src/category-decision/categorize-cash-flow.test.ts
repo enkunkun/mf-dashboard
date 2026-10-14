@@ -1,17 +1,19 @@
+import { generateCategoryDecisionsWithLLM } from "@mf-dashboard/analytics/categorization";
 import { findExistingTransactionMfIds } from "@mf-dashboard/db/repository/transactions";
 import type { CashFlowItem, CashFlowSummary } from "@mf-dashboard/db/types";
 import type { Page } from "playwright";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { getCsrfToken } from "../hooks/helpers.js";
-import { warn } from "../logger.js";
+import { info, warn } from "../logger.js";
 import { goToCashFlowMonth } from "../scrapers/cash-flow-history.js";
 import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 import { applyCategoryDecisions } from "./apply.js";
 import { categorizeCashFlowMonth } from "./categorize-cash-flow.js";
-import type { NormalizedCategoryDecisionConfig } from "./types.js";
+import type { CategoryDecisionUsage, NormalizedCategoryDecisionConfig } from "./types.js";
 
 vi.mock("@mf-dashboard/analytics/categorization", () => ({
   generateCategoryDecisionWithLLM: vi.fn<() => Promise<unknown>>(),
+  generateCategoryDecisionsWithLLM: vi.fn<() => Promise<unknown[]>>(),
 }));
 
 vi.mock("@mf-dashboard/db/repository/transactions", () => ({
@@ -76,6 +78,7 @@ describe("categorizeCashFlowMonth", () => {
     vi.mocked(getCsrfToken).mockReset();
     vi.mocked(applyCategoryDecisions).mockReset();
     vi.mocked(warn).mockReset();
+    vi.mocked(info).mockReset();
 
     vi.mocked(scrapeCategoryCandidates).mockResolvedValue([
       {
@@ -112,6 +115,34 @@ describe("categorizeCashFlowMonth", () => {
     expect(
       vi.mocked(applyCategoryDecisions).mock.calls[0]?.[0].decisions[0]?.transaction.mfId,
     ).toBe("new");
+  });
+
+  test("反映件数を実行全体に積み、月ごとの反映と見送りをinfoに出す", async () => {
+    vi.mocked(findExistingTransactionMfIds).mockResolvedValue(new Set());
+    vi.mocked(generateCategoryDecisionsWithLLM).mockResolvedValue([]);
+    vi.mocked(applyCategoryDecisions).mockImplementation(async ({ decisions }) => ({
+      appliedCount: decisions.length,
+      appliedDecisions: decisions,
+    }));
+    const usage: CategoryDecisionUsage = {
+      llmCallsUsed: 0,
+      appliedDecisions: 3,
+      skippedUndecided: 4,
+    };
+
+    await categorizeCashFlowMonth({
+      page: {} as Page,
+      db: {} as Parameters<typeof categorizeCashFlowMonth>[0]["db"],
+      cashFlow: cashFlow("2026-06", [item("rule"), item("llm", "Shop B")]),
+      config: { ...config, llm: { ...config.llm, enabled: true } },
+      usage,
+    });
+
+    expect(usage.appliedDecisions).toBe(4);
+    expect(usage.skippedUndecided).toBe(5);
+    expect(info).toHaveBeenCalledWith(
+      "Category decisions for 2026-06: applied 1/1, skipped 1 (low confidence 0, undecided 1)",
+    );
   });
 
   test("カテゴリを反映する前にその月の明細を表示する", async () => {

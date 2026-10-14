@@ -136,4 +136,37 @@ describe("ClassifyUncategorizedButton", () => {
     expect(routerRefresh).toHaveBeenCalledOnce();
     expect(await screen.findByText("分類と再取り込みが完了しました。")).toBeTruthy();
   });
+
+  it("shows applied and skipped counts when the run reports them", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+    render(<ClassifyUncategorizedButton allMonths />);
+    fireEvent.click(screen.getByRole("button", { name: "未分類を全期間一括処理" }));
+
+    await screen.findByRole("button", { name: "分類を開始済み" });
+    EventSourceMock.instances[0]!.onmessage?.({
+      data: JSON.stringify({
+        available: true,
+        running: false,
+        latestRun: {
+          version: 1,
+          runId: "run-a",
+          source: "manual",
+          startedAt: "2026-10-11T00:00:00.000Z",
+          finishedAt: "2026-10-11T00:01:00.000Z",
+          timeline: [],
+          runStatus: "success",
+          current: null,
+          progress: { completed: 1, total: 1 },
+          reason: null,
+          categorization: { applied: 693, skipped: 1593 },
+        },
+      }),
+    } as MessageEvent<string>);
+
+    expect(
+      await screen.findByText("分類と再取り込みが完了しました。反映 693 件 / 判定見送り 1,593 件"),
+    ).toBeTruthy();
+  });
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type CrawlerRunCategorization,
   getCrawlerRunStatePath,
   writeCrawlerRunState,
   type CrawlerRunCurrent,
@@ -52,6 +53,7 @@ export interface CrawlerProgressReporter {
   ) => Promise<void>;
   failStep: (stepId: string, reason: CrawlerReason) => Promise<void>;
   finish: (status: "success" | "failed", reason?: CrawlerReason) => Promise<void>;
+  recordCategorization: (categorization: CrawlerRunCategorization) => Promise<void>;
 }
 
 interface CrawlerProgressReporterOptions {
@@ -245,6 +247,11 @@ export async function createCrawlerProgressReporter(
         Object.assign(step, { status: "failed", finishedAt: new Date().toISOString(), reason });
         draft.current = toCurrent(step);
         draft.progress = runningProgressFor(draft.timeline);
+      });
+    },
+    recordCategorization: async (categorization) => {
+      await update((draft) => {
+        draft.categorization = { ...categorization };
       });
     },
     finish: async (status, reason) => {

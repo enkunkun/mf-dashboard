@@ -9,6 +9,7 @@ import {
   runCrawlerStep,
 } from "./crawler-progress.js";
 import { getCrawlerRunState, runWithCrawlerRunLock } from "./crawler-run-lock.js";
+import { readCrawlerRunState } from "./crawler-run-state.js";
 
 describe("crawler progress", () => {
   test("認証中の Playwright timeout を auth_failed に分類する", () => {
@@ -67,6 +68,28 @@ describe("crawler progress", () => {
 
     expect(reason).toEqual(expect.objectContaining(expected));
     expect(JSON.stringify(reason)).not.toContain("secret-value");
+  });
+
+  test("分類の反映件数と見送り件数を実行状態に書く", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "crawler-progress-categorization-"));
+    const statePath = path.join(tempDir, "state.json");
+    try {
+      const progress = await createCrawlerProgressReporter(statePath, {
+        id: "run-a",
+        source: "test",
+        startedAt: "2026-07-01T00:00:00.000Z",
+      });
+
+      await progress.recordCategorization({ applied: 3, skipped: 5 });
+      await progress.finish("success");
+
+      await expect(readCrawlerRunState({ statePath })).resolves.toMatchObject({
+        runStatus: "success",
+        categorization: { applied: 3, skipped: 5 },
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("nested step 完了後に外側の running step を current に戻す", async () => {

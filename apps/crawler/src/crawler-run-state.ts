@@ -89,12 +89,19 @@ export interface CrawlerRunProgress {
   total: number;
 }
 
+/** 未分類分類の実行で MoneyForward に反映した件数と、LLM の判定を見送った件数 */
+export interface CrawlerRunCategorization {
+  applied: number;
+  skipped: number;
+}
+
 interface CrawlerRunStateBase {
   version: 1;
   runId: string;
   source: string;
   startedAt: string;
   timeline: CrawlerRunTimelineItem[];
+  categorization?: CrawlerRunCategorization;
 }
 
 export type CrawlerRunStateSnapshot =
@@ -256,6 +263,12 @@ function isCrawlerRunProgress(value: unknown): value is CrawlerRunProgress {
   );
 }
 
+function isCrawlerRunCategorization(value: unknown): value is CrawlerRunCategorization {
+  return (
+    isRecord(value) && isNonNegativeInteger(value.applied) && isNonNegativeInteger(value.skipped)
+  );
+}
+
 function isCrawlerRunStateSnapshot(value: unknown): value is CrawlerRunStateSnapshot {
   if (
     !isRecord(value) ||
@@ -264,7 +277,8 @@ function isCrawlerRunStateSnapshot(value: unknown): value is CrawlerRunStateSnap
     typeof value.source !== "string" ||
     typeof value.startedAt !== "string" ||
     !Array.isArray(value.timeline) ||
-    !value.timeline.every(isCrawlerRunTimelineItem)
+    !value.timeline.every(isCrawlerRunTimelineItem) ||
+    (value.categorization !== undefined && !isCrawlerRunCategorization(value.categorization))
   ) {
     return false;
   }

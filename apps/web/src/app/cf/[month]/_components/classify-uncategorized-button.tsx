@@ -7,6 +7,13 @@ import { Button } from "../../../../components/ui/button";
 import { withBasePath } from "../../../../lib/base-path";
 import { parseCrawlerRefreshStatus } from "../../../../lib/crawler-refresh-status";
 
+function completionMessage(categorization?: { applied: number; skipped: number }): string {
+  const message = "分類と再取り込みが完了しました。";
+  if (!categorization) return message;
+  // 見送りは失敗ではないことが伝わるよう、反映件数と並べて出す
+  return `${message}反映 ${categorization.applied.toLocaleString("ja-JP")} 件 / 判定見送り ${categorization.skipped.toLocaleString("ja-JP")} 件`;
+}
+
 export function ClassifyUncategorizedButton({
   month,
   allMonths = false,
@@ -30,7 +37,7 @@ export function ClassifyUncategorizedButton({
         setStarted(false);
         setMessage(
           status.latestRun.runStatus === "success"
-            ? "分類と再取り込みが完了しました。"
+            ? completionMessage(status.latestRun.categorization)
             : "分類に失敗しました。更新アイコンから詳細を確認してください。",
         );
         events.close();

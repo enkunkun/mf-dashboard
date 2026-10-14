@@ -171,6 +171,53 @@ describe("runCrawler progress", () => {
     expect(runAnalyticsPhase).toHaveBeenCalledOnce();
   });
 
+  test.each([
+    ["全期間", { allMonths: true }],
+    ["複数月", { months: ["2026-09"] }],
+  ] satisfies Array<[string, { allMonths?: true; months?: string[] }]>)(
+    "%sの未分類分類は反映件数と見送り件数を実行状態に記録する",
+    async (_, target) => {
+      const { getAvailableMonths } = await import("@mf-dashboard/db");
+      vi.mocked(getAvailableMonths).mockResolvedValue([{ month: "2026-09" }]);
+      vi.mocked(runSetupPhase).mockResolvedValueOnce({
+        db: {} as never,
+        browser: { close: vi.fn<() => Promise<void>>() } as never,
+        context: {} as never,
+        page: {} as never,
+        categoryDecision: {
+          config: {} as never,
+          usage: {
+            llmCallsUsed: 0,
+            appliedDecisions: 3,
+            skippedLowConfidence: 2,
+            skippedUndecided: 4,
+          },
+        },
+      });
+      const progress = await createCrawlerProgressReporter(path.join(tempDir, "summary.json"), {
+        id: "run-summary",
+        source: "test",
+        startedAt: "2026-07-01T00:00:00.000Z",
+      });
+
+      await runCrawler(progress, { ...target, categorizeUncategorized: true });
+
+      expect(progress.getState().categorization).toEqual({ applied: 3, skipped: 6 });
+    },
+  );
+
+  test("未分類分類を指定しない再取り込みは分類件数を記録しない", async () => {
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "no-summary.json"), {
+      id: "run-no-summary",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await runCrawler(progress, { months: ["2026-09"] });
+
+    expect(progress.getState().categorization).toBeUndefined();
+  });
+
   test("分類設定がない場合は未分類取引の再処理を開始しない", async () => {
     vi.mocked(runLoadPhase).mockReturnValueOnce({
       skipRefresh: false,

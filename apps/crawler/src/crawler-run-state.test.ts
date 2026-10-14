@@ -192,6 +192,26 @@ describe("crawler run state file", () => {
     },
   );
 
+  test("reads a success snapshot with a categorization summary", async () => {
+    const state: CrawlerRunStateSnapshot = {
+      ...successState,
+      categorization: { applied: 693, skipped: 1593 },
+    };
+    await writeCrawlerRunState(state, { statePath });
+
+    await expect(readCrawlerRunState({ statePath })).resolves.toEqual(state);
+  });
+
+  test.each([
+    ["a negative count", { applied: -1, skipped: 0 }],
+    ["a missing count", { applied: 1 }],
+    ["a non-object value", "1/2"],
+  ])("returns null for a categorization summary with %s", async (_, categorization) => {
+    await writeFile(statePath, JSON.stringify({ ...successState, categorization }));
+
+    await expect(readCrawlerRunState({ statePath })).resolves.toBeNull();
+  });
+
   test("returns null when the state file does not exist", async () => {
     await expect(readCrawlerRunState({ statePath })).resolves.toBeNull();
   });

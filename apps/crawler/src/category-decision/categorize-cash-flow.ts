@@ -88,6 +88,25 @@ function applyDecisionsToCashFlow(
   };
 }
 
+async function applyResolvedDecisions(
+  page: Page,
+  month: string,
+  decisions: ResolvedCategoryDecision[],
+): Promise<ResolvedCategoryDecision[]> {
+  if (decisions.length === 0) return [];
+
+  // 更新は表示中の行の編集フォームを土台にするため、その月の明細を開いておく
+  await goToCashFlowMonth(page, month);
+  const csrfToken = await getCsrfToken(page);
+  if (!csrfToken) {
+    warn("Skipped category update because CSRF token was not found.");
+    return [];
+  }
+
+  const { appliedDecisions } = await applyCategoryDecisions({ page, csrfToken, decisions });
+  return appliedDecisions;
+}
+
 export async function categorizeCashFlowMonth(options: {
   page: Page;
   db: Db;
@@ -132,32 +151,22 @@ export async function categorizeCashFlowMonth(options: {
           usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + cacheWriteTokens;
         }),
     });
+    const skippedBefore = {
+      lowConfidence: usage.skippedLowConfidence ?? 0,
+      undecided: usage.skippedUndecided ?? 0,
+    };
     const decisions = await engine.decideMany(targets);
+    const appliedDecisions = await applyResolvedDecisions(page, cashFlow.month, decisions);
+    usage.appliedDecisions = (usage.appliedDecisions ?? 0) + appliedDecisions.length;
 
-    if (decisions.length === 0) {
-      return cashFlow;
-    }
-
-    // 更新は表示中の行の編集フォームを土台にするため、その月の明細を開いておく
-    await goToCashFlowMonth(page, cashFlow.month);
-    const csrfToken = await getCsrfToken(page);
-    if (!csrfToken) {
-      warn("Skipped category update because CSRF token was not found.");
-      return cashFlow;
-    }
-
-    const { appliedCount, appliedDecisions } = await applyCategoryDecisions({
-      page,
-      csrfToken,
-      decisions,
-    });
-    if (appliedCount === 0) {
-      return cashFlow;
-    }
+    const lowConfidence = (usage.skippedLowConfidence ?? 0) - skippedBefore.lowConfidence;
+    const undecided = (usage.skippedUndecided ?? 0) - skippedBefore.undecided;
+    info(
+      `Category decisions for ${cashFlow.month}: applied ${appliedDecisions.length}/${decisions.length}, skipped ${lowConfidence + undecided} (low confidence ${lowConfidence}, undecided ${undecided})`,
+    );
+    if (appliedDecisions.length === 0) return cashFlow;
 
     await onAppliedDecisions?.(appliedDecisions);
-
-    info(`Applied category decisions: ${appliedCount}/${decisions.length} for ${cashFlow.month}`);
     return applyDecisionsToCashFlow(cashFlow, appliedDecisions);
   } catch {
     warn(

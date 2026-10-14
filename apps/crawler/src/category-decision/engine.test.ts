@@ -2,6 +2,8 @@ import { describe, expect, test, vi } from "vitest";
 import { CategoryDecisionEngine, selectTransactionsForCategorization } from "./engine.js";
 import type {
   CategoryCandidate,
+  CategoryDecisionUsage,
+  LLMCategoryBatchDecider,
   LLMCategoryDecider,
   NormalizedCategoryDecisionConfig,
   TransactionForCategorization,
@@ -245,6 +247,93 @@ describe("CategoryDecisionEngine", () => {
     const result = await engine.decideMany([tx()]);
 
     expect(result).toEqual([]);
+  });
+
+  test("バッチ判定でconfidenceが閾値未満の明細は低confidenceの見送りとして数える", async () => {
+    const llmBatchDecider = vi.fn<LLMCategoryBatchDecider>().mockResolvedValue([
+      {
+        index: 0,
+        source: "llm",
+        largeCategoryId: "13",
+        middleCategoryId: "77",
+        confidence: 0.9,
+        reason: "subscription",
+      },
+      {
+        index: 1,
+        source: "llm",
+        largeCategoryId: "13",
+        middleCategoryId: "77",
+        confidence: 0.64,
+        reason: "low confidence",
+      },
+    ]);
+    const config: NormalizedCategoryDecisionConfig = {
+      llm: { enabled: true, maxPerRun: 5, minConfidence: 0.65 },
+      rules: [],
+    };
+    const usage: CategoryDecisionUsage = { llmCallsUsed: 0 };
+    const engine = new CategoryDecisionEngine({ config, candidates, llmBatchDecider, usage });
+
+    const result = await engine.decideMany([tx({ mfId: "tx-1" }), tx({ mfId: "tx-2" })]);
+
+    expect(result.map((item) => item.transaction.mfId)).toEqual(["tx-1"]);
+    expect(usage.skippedLowConfidence).toBe(1);
+  });
+
+  test("バッチ判定で判定が返らなかった明細は判定なしの見送りとして数える", async () => {
+    const llmBatchDecider = vi
+      .fn<LLMCategoryBatchDecider>()
+      .mockResolvedValue([
+        {
+          index: 1,
+          source: "llm",
+          largeCategoryId: "13",
+          middleCategoryId: "77",
+          confidence: 0.9,
+          reason: "subscription",
+        },
+      ]);
+    const config: NormalizedCategoryDecisionConfig = {
+      llm: { enabled: true, maxPerRun: 5, minConfidence: 0.65 },
+      rules: [],
+    };
+    const usage: CategoryDecisionUsage = { llmCallsUsed: 0 };
+    const engine = new CategoryDecisionEngine({ config, candidates, llmBatchDecider, usage });
+
+    const result = await engine.decideMany([
+      tx({ mfId: "tx-1" }),
+      tx({ mfId: "tx-2" }),
+      tx({ mfId: "tx-3" }),
+    ]);
+
+    expect(result.map((item) => item.transaction.mfId)).toEqual(["tx-2"]);
+    expect(usage.skippedUndecided).toBe(2);
+    expect(usage.skippedLowConfidence ?? 0).toBe(0);
+  });
+
+  test("単発判定でもnullとconfidence未満を見送りとして数える", async () => {
+    const llmDecider = vi
+      .fn<LLMCategoryDecider>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        source: "llm",
+        largeCategoryId: "13",
+        middleCategoryId: "77",
+        confidence: 0.64,
+        reason: "low confidence",
+      });
+    const config: NormalizedCategoryDecisionConfig = {
+      llm: { enabled: true, maxPerRun: 5, minConfidence: 0.65 },
+      rules: [],
+    };
+    const usage: CategoryDecisionUsage = { llmCallsUsed: 0 };
+    const engine = new CategoryDecisionEngine({ config, candidates, llmDecider, usage });
+
+    await engine.decideMany([tx({ mfId: "tx-1" }), tx({ mfId: "tx-2" })]);
+
+    expect(usage.skippedUndecided).toBe(1);
+    expect(usage.skippedLowConfidence).toBe(1);
   });
 
   test("LLM失敗ログへ取引IDやprovider errorを含めない", async () => {

@@ -88,4 +88,10 @@ export interface CategoryDecisionUsage {
   llmCallsUsed: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** MoneyForward にカテゴリを反映できた明細の数 */
+  appliedDecisions?: number;
+  /** LLM の confidence が minConfidence 未満で採用しなかった明細の数 */
+  skippedLowConfidence?: number;
+  /** LLM に送ったが判定が返らなかった明細の数 */
+  skippedUndecided?: number;
 }

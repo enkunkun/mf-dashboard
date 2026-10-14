@@ -152,15 +152,22 @@ export class CategoryDecisionEngine {
       try {
         const decisions = await this.#llmBatchDecider!(batch);
         const seenIndexes = new Set<number>();
+        let answeredCount = 0;
         for (const decision of decisions) {
           if (seenIndexes.has(decision.index)) continue;
           seenIndexes.add(decision.index);
           const target = batch[decision.index];
-          if (!target || decision.confidence < this.#config.llm.minConfidence) continue;
+          if (!target) continue;
+          answeredCount += 1;
+          if (decision.confidence < this.#config.llm.minConfidence) {
+            this.#countSkipped("skippedLowConfidence", 1);
+            continue;
+          }
 
           const resolved = this.#resolveLLMDecision(target.transaction, decision);
           if (resolved) results.push(resolved);
         }
+        this.#countSkipped("skippedUndecided", batch.length - answeredCount);
       } catch {
         this.#warn("LLM category decision failed (code: LLM_REQUEST_FAILED).");
       }
@@ -186,9 +193,13 @@ export class CategoryDecisionEngine {
 
       this.#usage.llmCallsUsed += 1;
       const llmDecision = await this.#llmDecider(transaction, llmCandidates);
-      if (!llmDecision) return null;
+      if (!llmDecision) {
+        this.#countSkipped("skippedUndecided", 1);
+        return null;
+      }
 
       if (llmDecision.confidence < this.#config.llm.minConfidence) {
+        this.#countSkipped("skippedLowConfidence", 1);
         return null;
       }
 
@@ -197,6 +208,10 @@ export class CategoryDecisionEngine {
       this.#warn("LLM category decision failed (code: LLM_REQUEST_FAILED).");
       return null;
     }
+  }
+
+  #countSkipped(kind: "skippedLowConfidence" | "skippedUndecided", count: number): void {
+    this.#usage[kind] = (this.#usage[kind] ?? 0) + count;
   }
 
   #decideByRule(transaction: TransactionForCategorization): ResolvedCategoryDecision | null {
