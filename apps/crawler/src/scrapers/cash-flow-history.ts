@@ -501,6 +501,36 @@ async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
   return true;
 }
 
+async function openCashFlowPage(page: Page): Promise<void> {
+  await page.goto(mfUrls.cashFlow, { waitUntil: "domcontentloaded" });
+  // テーブルが表示されるまで待機
+  await page.locator("#cf-detail-table").waitFor({ state: "visible", timeout: 10000 });
+}
+
+async function navigateToCashFlowMonth(page: Page, month: string): Promise<void> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new Error("Invalid target cash flow month");
+  }
+  let displayedMonth = await getDisplayedCashFlowMonth(page);
+  while (displayedMonth > month) {
+    if (!(await goToPreviousCashFlowMonth(page))) {
+      throw new Error(`MoneyForward does not have cash flow data for ${month}`);
+    }
+    displayedMonth = await getDisplayedCashFlowMonth(page);
+  }
+  if (displayedMonth !== month) {
+    throw new Error(`MoneyForward does not have cash flow data for ${month}`);
+  }
+}
+
+/**
+ * /cf を開き直し、指定した月の明細が表示されるまで前月へ戻る
+ */
+export async function goToCashFlowMonth(page: Page, month: string): Promise<void> {
+  await openCashFlowPage(page);
+  await navigateToCashFlowMonth(page, month);
+}
+
 /**
  * 過去N月分の家計簿データを取得
  * UIの前月ボタンをクリックして月を切り替えながら取得
@@ -517,24 +547,10 @@ export async function scrapeCashFlowHistory(
 ): Promise<CashFlowHistoryResult[]> {
   log(`Scraping cash flow history for ${monthsToScrape} months...`);
 
-  await page.goto(mfUrls.cashFlow, { waitUntil: "domcontentloaded" });
-  // テーブルが表示されるまで待機
-  await page.locator("#cf-detail-table").waitFor({ state: "visible", timeout: 10000 });
+  await openCashFlowPage(page);
 
   if (callbacks.targetMonth) {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(callbacks.targetMonth)) {
-      throw new Error("Invalid target cash flow month");
-    }
-    let displayedMonth = await getDisplayedCashFlowMonth(page);
-    while (displayedMonth > callbacks.targetMonth) {
-      if (!(await goToPreviousCashFlowMonth(page))) {
-        throw new Error(`MoneyForward does not have cash flow data for ${callbacks.targetMonth}`);
-      }
-      displayedMonth = await getDisplayedCashFlowMonth(page);
-    }
-    if (displayedMonth !== callbacks.targetMonth) {
-      throw new Error(`MoneyForward does not have cash flow data for ${callbacks.targetMonth}`);
-    }
+    await navigateToCashFlowMonth(page, callbacks.targetMonth);
     monthsToScrape = 1;
   }
 
