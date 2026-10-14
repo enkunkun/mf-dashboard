@@ -282,18 +282,16 @@ describe("CategoryDecisionEngine", () => {
   });
 
   test("バッチ判定で判定が返らなかった明細は判定なしの見送りとして数える", async () => {
-    const llmBatchDecider = vi
-      .fn<LLMCategoryBatchDecider>()
-      .mockResolvedValue([
-        {
-          index: 1,
-          source: "llm",
-          largeCategoryId: "13",
-          middleCategoryId: "77",
-          confidence: 0.9,
-          reason: "subscription",
-        },
-      ]);
+    const llmBatchDecider = vi.fn<LLMCategoryBatchDecider>().mockResolvedValue([
+      {
+        index: 1,
+        source: "llm",
+        largeCategoryId: "13",
+        middleCategoryId: "77",
+        confidence: 0.9,
+        reason: "subscription",
+      },
+    ]);
     const config: NormalizedCategoryDecisionConfig = {
       llm: { enabled: true, maxPerRun: 5, minConfidence: 0.65 },
       rules: [],
