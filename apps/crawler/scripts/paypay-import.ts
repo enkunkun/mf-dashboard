@@ -6,23 +6,25 @@
  *   - PayPayカード (カード)                : カード利用
  * カード→PayPay のチャージは「振替」として記録し二重計上を避ける。
  *
+ * この処理は `paypay-sync.ts`（本番の定期取込）からも `runPayPayImport()` として呼ばれる。
+ *
  * 使い方:
  *   tsx --env-file=../../.env scripts/paypay-import.ts                          # dry-run
  *   tsx --env-file=../../.env scripts/paypay-import.ts --reset                  # 口座を作り直す
  *   tsx --env-file=../../.env scripts/paypay-import.ts --apply [--limit N] [--kind チャージ]
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 import type { Page } from "playwright";
 import { loginWithAuthState } from "../src/auth/login.js";
 import { createBrowserContext } from "../src/browser/context.js";
 import { getCsrfToken } from "../src/hooks/helpers.js";
+import { PAYPAY_DIR } from "./lib/paypay-tokens.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "../../..");
 const statePath = path.resolve(projectRoot, "data/paypay-synced-ids.json");
-const CSV_DIR = process.env.PAYPAY_DIR ?? path.join(os.homedir(), ".local", "share", "paypay-hook");
+const CSV_DIR = PAYPAY_DIR;
 
 const ACCOUNTS = {
   paypay: { name: "PayPay", categoryLabel: "電子マネー・プリペイド" },
@@ -30,16 +32,16 @@ const ACCOUNTS = {
 } as const;
 type AccountKey = keyof typeof ACCOUNTS;
 
-const args = process.argv.slice(2);
-const has = (f: string) => args.includes(f);
-const valueOf = (f: string) => {
-  const i = args.indexOf(f);
-  return i >= 0 ? args[i + 1] : undefined;
+export type PayPayImportOptions = {
+  /** 実際に MoneyForward へ登録する。false なら dry-run。 */
+  apply?: boolean;
+  /** 口座を作り直す（既存の PayPay 口座を削除）。 */
+  reset?: boolean;
+  /** 登録件数の上限（テスト用）。 */
+  limit?: number;
+  /** 取引内容で絞り込む。 */
+  kind?: string;
 };
-const APPLY = has("--apply");
-const RESET = has("--reset");
-const LIMIT = valueOf("--limit") ? Number(valueOf("--limit")) : undefined;
-const KIND_FILTER = valueOf("--kind");
 
 type Entry = {
   mode: "expense" | "income" | "transfer";
@@ -287,9 +289,10 @@ async function resolveSubHashes(page: Page): Promise<Record<AccountKey, string>>
   throw new Error("sub_account_id_hash 解決失敗");
 }
 
-async function main() {
+export async function runPayPayImport(options: PayPayImportOptions = {}): Promise<void> {
+  const { apply = false, reset = false, limit, kind } = options;
   let entries = loadEntries();
-  if (KIND_FILTER) entries = entries.filter((e) => e.kind === KIND_FILTER);
+  if (kind) entries = entries.filter((e) => e.kind === kind);
 
   const byMode = entries.reduce<Record<string, number>>((a, e) => {
     const k = e.mode === "transfer" ? `${e.from}->${e.to}` : `${e.mode}:${e.account}`;
@@ -314,17 +317,17 @@ async function main() {
     console.log(`  ${e.date} ${label} ${e.amount} ${e.content} [${e.kind}/${e.method}]`);
   }
 
-  if (!RESET && !APPLY) {
+  if (!reset && !apply) {
     console.log("\n--dry-run 完了（--reset / --apply を付けると書き込みます）");
     return;
   }
 
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: !process.env.HEADED });
   const context = await createBrowserContext(browser, { useAuthState: true });
   const page = await context.newPage();
   await loginWithAuthState(page, context);
 
-  if (RESET) {
+  if (reset) {
     await deleteAccount(page, ACCOUNTS.paypay.name);
     await deleteAccount(page, ACCOUNTS.card.name);
     if (fs.existsSync(statePath)) {
@@ -339,13 +342,13 @@ async function main() {
   const sub = await resolveSubHashes(page);
   console.log("sub hashes:", JSON.stringify(sub));
 
-  if (!APPLY) {
+  if (!apply) {
     console.log("--apply なしのため登録は行いません");
     await browser.close();
     return;
   }
 
-  const toImport = LIMIT ? targets.slice(0, LIMIT) : targets;
+  const toImport = limit ? targets.slice(0, limit) : targets;
   const csrf = await getCsrfToken(page);
   if (!csrf) throw new Error("CSRF token not found");
 
@@ -402,7 +405,22 @@ async function main() {
   await browser.close();
 }
 
-main().catch((err) => {
-  console.error("error:", err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const args = process.argv.slice(2);
+  const has = (f: string) => args.includes(f);
+  const valueOf = (f: string) => {
+    const i = args.indexOf(f);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const limitArg = valueOf("--limit");
+
+  runPayPayImport({
+    apply: has("--apply"),
+    reset: has("--reset"),
+    limit: limitArg ? Number(limitArg) : undefined,
+    kind: valueOf("--kind"),
+  }).catch((err) => {
+    console.error("error:", err);
+    process.exit(1);
+  });
+}

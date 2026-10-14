@@ -23,7 +23,7 @@ import {
   ORIGIN,
   REDIRECT_URI,
   baseHeaders,
-  saveTokens,
+  persistTokens,
   type Tokens,
 } from "./paypay-api.js";
 
@@ -226,7 +226,7 @@ export async function completeLogin(digits: string, timeoutMs = 180_000): Promis
     cdp.ws.close();
     throw new Error(`トークン交換に失敗: ${JSON.stringify(tokens).slice(0, 300)}`);
   }
-  saveTokens({ ...(tokens.payload as Tokens), savedAt: new Date().toISOString() });
+  await persistTokens({ ...(tokens.payload as Tokens), savedAt: new Date().toISOString() });
   cdp.ws.close();
   console.log(`✅ トークンを保存しました（有効期限: ${tokens.payload.expiredAt ?? "不明"}）`);
 }

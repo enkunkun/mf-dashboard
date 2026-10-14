@@ -21,6 +21,8 @@
     "sync:revolut": "tsx --env-file=../../.env scripts/revolut-sync.ts",
     "sync:revolut-csv": "tsx --env-file=../../.env scripts/sync-revolut-csv.ts",
     "status:revolut": "tsx scripts/revolut-status.ts",
+    "sync:suica": "tsx --env-file=../../.env scripts/suica-sync.ts",
+    "sync:paypay": "tsx --env-file=../../.env scripts/paypay-sync.ts",
     "test": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",
     "typecheck": "tsc --noEmit"

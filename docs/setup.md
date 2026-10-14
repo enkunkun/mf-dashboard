@@ -376,3 +376,49 @@ cp data/category-rules.example.json data/category-rules.json
 - 更新に失敗してもcrawlerは停止せず、対象取引を未分類のまま保存する
 
 採用したカテゴリはMoney Forward MEの`/cf/update`へ反映する。その後、対象月を再取得してデータベースへ保存する。外部プロバイダーへ取引情報を送信してよい場合だけ、LLMによる推論を有効にする。
+
+### PayPay 取引履歴の自動取込
+
+PayPay の非公開 API から取引履歴 CSV を取得し、Money Forward ME の「PayPay」「PayPayカード」口座へ取り込む。API を利用するため**ログインだけは実 Chrome が必要**で、この工程は Mac 側で行う。以降の取得・取込は crawler コンテナが毎日 07:00（JST）に自動実行する。
+
+#### 1Password にトークン項目を作る
+
+`OP_VAULT`と同じ保管庫に、PayPay のトークンを保管する項目を作る。
+
+- 項目の種類: `Login`または`Password`（任意）
+- 項目名: `OP_PAYPAY_ITEM`に設定する値（例: `PayPay`）
+- フィールド: `OP_PAYPAY_FIELD`（既定`tokens`）という名前のテキスト/Concealedフィールド
+
+サービスアカウントにその項目への書き込み権限があると、refresh後のトークンが自動で書き戻される。読み取りのみでも動作するが、その場合はトークンの更新を手動で行う必要がある。
+
+`.env`へ次を追加する。
+
+```dotenv
+OP_PAYPAY_ITEM=PayPay
+OP_PAYPAY_FIELD=tokens
+```
+
+#### Mac でログインする（初回・失効時のみ）
+
+1Passwordの項目へ1回ログインしたトークンを保存すれば、以降はrefreshで延命される。
+
+```sh
+# 認可ページを開く（実 Chrome が必要）
+pnpm --filter @mf-dashboard/crawler exec tsx --env-file=../../.env scripts/paypay-fetch.ts login:start
+
+# SMS に届く 4 桁を渡す（自動で 1Password に保存）
+pnpm --filter @mf-dashboard/crawler exec tsx --env-file=../../.env scripts/paypay-fetch.ts login:otp 1234
+```
+
+#### サーバーでの動作
+
+crawlerコンテナ内のsupercronicが`docker/crawler/crontab`のスケジュールで毎日07:00に実行する。手動で今すぐ実行する場合は次のコマンドを使う。
+
+```sh
+docker compose exec crawler pnpm --filter @mf-dashboard/crawler sync:paypay -- --dry-run  # 取得のみ
+docker compose exec crawler pnpm --filter @mf-dashboard/crawler sync:paypay              # 取得 + 取込
+```
+
+- 取得は直近35日のローリング窓でレポートを作り直す。取込は取引番号で重複排除する
+- スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
+- ログイン（実 Chrome）はデプロイ先のホストでは行えないため、トークンが失効した場合はローカルで再ログインして1Passwordを更新する

@@ -10,17 +10,17 @@
  * 既存の CSV インポート（scripts/paypay-import.ts）がそのまま読める。
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import {
+  PAYPAY_DIR,
+  TOKENS_PATH,
+  persistTokens,
+  resolveTokens,
+  type Tokens,
+} from "./paypay-tokens.js";
 
-/**
- * トークンと CSV の置き場。既定は `~/.local/share/paypay-hook`。
- * 別の場所に置く場合は環境変数 `PAYPAY_DIR` で上書きする。
- * **このディレクトリはリポジトリに含めない**（トークンと明細が入るため）。
- */
-export const PAYPAY_DIR =
-  process.env.PAYPAY_DIR ?? path.join(os.homedir(), ".local", "share", "paypay-hook");
-export const TOKENS_PATH = path.resolve(PAYPAY_DIR, "tokens.json");
+export { PAYPAY_DIR, persistTokens, resolveTokens, TOKENS_PATH, type Tokens };
+
 export const LOGIN_STATE_PATH = path.resolve(PAYPAY_DIR, "login-state.json");
 
 export const ORIGIN = "https://app4.paypay.ne.jp";
@@ -58,37 +58,9 @@ export type Report = {
   targetTo: string;
 };
 
-/**
- * tokens.json の形。expiredAt は accessToken の失効時刻（ISO）。
- * refreshToken は実測では refresh してもローテーションされない（同一値が返る）。
- */
-export type Tokens = {
-  accessToken: string;
-  refreshToken: string;
-  expiredAt?: string;
-  issuedAt?: string;
-  savedAt?: string;
-  [k: string]: unknown;
-};
-
-export function loadTokens(): Tokens {
-  if (!fs.existsSync(TOKENS_PATH)) {
-    throw new Error(
-      `${TOKENS_PATH} がありません。先に \`npx tsx scripts/paypay-fetch.ts login:start\` でログインしてください`,
-    );
-  }
-  return JSON.parse(fs.readFileSync(TOKENS_PATH, "utf8")) as Tokens;
-}
-
-export function saveTokens(tokens: Tokens): void {
-  fs.mkdirSync(PAYPAY_DIR, { recursive: true });
-  fs.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2));
-  fs.chmodSync(TOKENS_PATH, 0o600);
-}
-
 /** accessToken を返す。期限切れ間近なら refresh する。 */
 export async function accessToken(forceRefresh = false): Promise<string> {
-  const tokens = loadTokens();
+  const tokens = await resolveTokens();
   // expiredAt は accessToken の失効時刻（ISO）。5 分の余裕を見る。
   const expired = tokens.expiredAt ? Date.parse(tokens.expiredAt) : 0;
   if (!forceRefresh && expired > Date.now() + 5 * 60_000) return tokens.accessToken;
@@ -114,7 +86,7 @@ export async function accessToken(forceRefresh = false): Promise<string> {
     refreshToken: body.payload.refreshToken ?? tokens.refreshToken,
     savedAt: new Date().toISOString(),
   } as Tokens;
-  saveTokens(next);
+  await persistTokens(next);
   return next.accessToken;
 }
 
