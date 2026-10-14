@@ -71,12 +71,12 @@ export type LLMCategoryDecider = (
   candidates: CategoryCandidate[],
 ) => Promise<LLMCategoryDecision | null>;
 
-export interface LLMCategoryBatchItem {
+interface LLMCategoryBatchItem {
   transaction: TransactionForCategorization;
   candidates: CategoryCandidate[];
 }
 
-export interface IndexedLLMCategoryDecision extends LLMCategoryDecision {
+interface IndexedLLMCategoryDecision extends LLMCategoryDecision {
   index: number;
 }
 

@@ -7,6 +7,7 @@ import {
   runAnalyticsPhase,
   runAuthPhase,
   runCashFlowHistoryPhase,
+  runExistingCashFlowCategorizationPhase,
   runInstitutionCategoryPhase,
   runLoadPhase,
   runNotificationPhase,
@@ -31,6 +32,7 @@ vi.mock("./crawler-phases.js", () => ({
   runAnalyticsPhase: vi.fn<() => void>(),
   runAuthPhase: vi.fn<() => void>(),
   runCashFlowHistoryPhase: vi.fn<() => void>(),
+  runExistingCashFlowCategorizationPhase: vi.fn<() => Promise<number>>().mockResolvedValue(0),
   runInstitutionCategoryPhase: vi.fn<() => Map<string, string>>(),
   runLoadPhase: vi.fn<() => void>(),
   runNotificationPhase: vi.fn<() => void>(),
@@ -162,14 +164,9 @@ describe("runCrawler progress", () => {
 
     await runCrawler(progress, { allMonths: true, categorizeUncategorized: true });
 
-    expect(runCashFlowHistoryPhase).toHaveBeenCalledOnce();
-    expect(runCashFlowHistoryPhase).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ monthsToFetch: 2, includeExistingUncategorized: true }),
-      expect.anything(),
-      expect.anything(),
-    );
+    // 取得はせず、既存の未分類明細だけを再処理する
+    expect(runExistingCashFlowCategorizationPhase).toHaveBeenCalledOnce();
+    expect(runCashFlowHistoryPhase).not.toHaveBeenCalled();
     expect(runScrapePhase).not.toHaveBeenCalled();
     expect(runAnalyticsPhase).toHaveBeenCalledOnce();
   });
