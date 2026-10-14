@@ -415,9 +415,13 @@ pnpm --filter @mf-dashboard/crawler exec tsx --env-file=../../.env scripts/paypa
 crawlerコンテナ内のsupercronicが`docker/crawler/crontab`のスケジュールで毎日07:00に実行する。手動で今すぐ実行する場合は次のコマンドを使う。
 
 ```sh
-docker compose exec crawler pnpm --filter @mf-dashboard/crawler sync:paypay -- --dry-run  # 取得のみ
-docker compose exec crawler pnpm --filter @mf-dashboard/crawler sync:paypay              # 取得 + 取込
+# 取得のみ（CSV を確認）
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypay-sync.ts --dry-run
+# 取得 + 取込
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypay-sync.ts
 ```
+
+- 手元（Mac）では `pnpm --filter @mf-dashboard/crawler sync:paypay` も使える（`--env-file` を読むため）
 
 - 取得は直近35日のローリング窓でレポートを作り直す。取込は取引番号で重複排除する
 - スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
