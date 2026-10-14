@@ -5,6 +5,7 @@ const config: KnipConfig = {
     "apps/crawler": {
       ignore: ["src/hooks/helpers.ts"],
       entry: ["scripts/**/*.ts"],
+      ignoreBinaries: ["bw", "op"],
     },
     "apps/web": {
       entry: ["e2e/mock-crawler-server.ts"],
