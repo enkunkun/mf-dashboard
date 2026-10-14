@@ -236,6 +236,45 @@ describe("runCrawler progress", () => {
     ]);
   });
 
+  test("複数月の再取り込みは指定順に各月を取り込み、分析と web 更新は最後に 1 回だけ行う", async () => {
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "months.json"), {
+      id: "run-months",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await runCrawler(progress, { months: ["2026-09", "2025-07"] });
+
+    expect(vi.mocked(runCashFlowHistoryPhase).mock.calls.map(([, , options]) => options)).toEqual([
+      expect.objectContaining({ targetMonth: "2026-09", includeExistingUncategorized: false }),
+      expect.objectContaining({ targetMonth: "2025-07", includeExistingUncategorized: false }),
+    ]);
+    expect(runScrapePhase).not.toHaveBeenCalled();
+    expect(runSavePhase).not.toHaveBeenCalled();
+    expect(runAnalyticsPhase).toHaveBeenCalledOnce();
+    expect(notifyWebRefresh).toHaveBeenCalledOnce();
+  });
+
+  test("複数月の再取り込みは途中の月で失敗すると後続の月と分析を実行しない", async () => {
+    vi.mocked(runCashFlowHistoryPhase).mockRejectedValueOnce(
+      new Error("MoneyForward does not have cash flow data for 2026-09"),
+    );
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "months-failed.json"), {
+      id: "run-months-failed",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await expect(runCrawler(progress, { months: ["2026-09", "2025-07"] })).rejects.toThrow(
+      "MoneyForward does not have cash flow data for 2026-09",
+    );
+
+    expect(runCashFlowHistoryPhase).toHaveBeenCalledOnce();
+    expect(runAnalyticsPhase).not.toHaveBeenCalled();
+    expect(notifyWebRefresh).not.toHaveBeenCalled();
+    expect(handleCrawlerFailure).toHaveBeenCalled();
+  });
+
   test("認証失敗時はスクレイプを開始しない", async () => {
     const authError = new Error("Login failed");
     vi.mocked(runAuthPhase).mockRejectedValueOnce(authError);

@@ -18,11 +18,28 @@ import type { MoneyForwardOperation } from "./moneyforward/operations.js";
 
 const DEFAULT_PORT = 8766;
 const DEFAULT_HOST = "127.0.0.1";
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+const MAX_REQUESTED_MONTHS = 36;
+
+function isMonth(value: unknown): value is string {
+  return typeof value === "string" && MONTH_PATTERN.test(value);
+}
+
+function isRequestedMonths(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= MAX_REQUESTED_MONTHS &&
+    value.every(isMonth) &&
+    new Set(value).size === value.length
+  );
+}
 
 interface CrawlerTriggerServerOptions {
   getState?: () => Promise<CrawlerRunState>;
   startRun?: (options?: {
     month?: string;
+    months?: string[];
     allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: MoneyForwardOperation;
@@ -50,9 +67,12 @@ function methodNotAllowed(response: ServerResponse): void {
   response.end();
 }
 
-async function readRunOptions(
-  request: IncomingMessage,
-): Promise<{ month?: string; allMonths?: boolean; categorizeUncategorized?: boolean } | null> {
+async function readRunOptions(request: IncomingMessage): Promise<{
+  month?: string;
+  months?: string[];
+  allMonths?: boolean;
+  categorizeUncategorized?: boolean;
+} | null> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -68,20 +88,25 @@ async function readRunOptions(
     if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
     const month = Reflect.get(body, "month");
     const allMonths = Reflect.get(body, "allMonths");
+    const months = Reflect.get(body, "months");
     const categorizeUncategorized = Reflect.get(body, "categorizeUncategorized");
     if (allMonths !== undefined && allMonths !== true) return null;
     if (allMonths === true) {
-      return month === undefined && categorizeUncategorized === true
+      return month === undefined && months === undefined && categorizeUncategorized === true
         ? { allMonths: true, categorizeUncategorized: true }
         : null;
     }
-    if (month === undefined) return categorizeUncategorized === undefined ? {} : null;
-    if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+    if (month === undefined && months === undefined) {
+      return categorizeUncategorized === undefined ? {} : null;
+    }
+    if (month !== undefined && months !== undefined) return null;
+    if (month !== undefined && !isMonth(month)) return null;
+    if (months !== undefined && !isRequestedMonths(months)) return null;
     if (categorizeUncategorized !== undefined && typeof categorizeUncategorized !== "boolean") {
       return null;
     }
     return {
-      month,
+      ...(month === undefined ? { months: months as string[] } : { month }),
       ...(categorizeUncategorized === true ? { categorizeUncategorized: true } : {}),
     };
   } catch {
@@ -109,8 +134,7 @@ async function readMoneyForwardOperation(
     const excluded = Reflect.get(body, "excluded");
     if (
       type !== "set-calculation-exclusion" ||
-      typeof month !== "string" ||
-      !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
+      !isMonth(month) ||
       typeof transactionId !== "string" ||
       !/^[\w-]{1,200}$/.test(transactionId) ||
       typeof excluded !== "boolean"
@@ -273,6 +297,7 @@ async function streamCrawlerState(
 export async function startCrawlerRun(
   options: {
     month?: string;
+    months?: string[];
     allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: MoneyForwardOperation;

@@ -43,6 +43,7 @@ export async function runCrawler(
   progress: CrawlerProgressReporter,
   options: {
     month?: string;
+    months?: string[];
     allMonths?: boolean;
     categorizeUncategorized?: boolean;
     operation?: import("./moneyforward/operations.js").MoneyForwardOperation;
@@ -123,23 +124,27 @@ export async function runCrawler(
       return;
     }
 
-    if (config.targetMonth) {
+    const targetMonths = options.months ?? (config.targetMonth ? [config.targetMonth] : []);
+    if (targetMonths.length > 0) {
       if (options.categorizeUncategorized && !activeRuntime.categoryDecision.config) {
         throw new Error("Uncategorized classification is not configured");
       }
-      await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, () =>
-        runCashFlowHistoryPhase(
-          activeRuntime.db,
-          activeRuntime.page,
-          {
-            isHistoryMode: false,
-            targetMonth: config.targetMonth,
-            includeExistingUncategorized: options.categorizeUncategorized === true,
-          },
-          activeRuntime.categoryDecision,
-          progress,
-        ),
-      );
+      // 分析と web 更新はグループ全期間が対象なので、全月を取り込んでから 1 回だけ行う
+      for (const targetMonth of targetMonths) {
+        await runCrawlerStep(progress, CRAWLER_STEPS.databaseSave, () =>
+          runCashFlowHistoryPhase(
+            activeRuntime.db,
+            activeRuntime.page,
+            {
+              isHistoryMode: false,
+              targetMonth,
+              includeExistingUncategorized: options.categorizeUncategorized === true,
+            },
+            activeRuntime.categoryDecision,
+            progress,
+          ),
+        );
+      }
       const groups = await getAllGroups(activeRuntime.db);
       await runCrawlerStep(progress, CRAWLER_STEPS.analytics, () =>
         runAnalyticsPhase(
@@ -158,7 +163,7 @@ export async function runCrawler(
         );
         error("Failed to refresh web cache:", err);
       }
-      info(`Reimported MoneyForward cash flow for ${config.targetMonth}`);
+      info(`Reimported MoneyForward cash flow for ${targetMonths.join(", ")}`);
       return;
     }
 

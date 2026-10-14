@@ -260,6 +260,65 @@ describe("crawler trigger server", () => {
     expect(startRun).toHaveBeenCalledWith({ month: "2025-07" });
   });
 
+  test("starts a manual run for requested months", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ months: ["2026-09", "2025-07"] }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({ months: ["2026-09", "2025-07"] });
+  });
+
+  test("starts requested-months uncategorized classification", async () => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ months: ["2025-07"], categorizeUncategorized: true }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(startRun).toHaveBeenCalledWith({ months: ["2025-07"], categorizeUncategorized: true });
+  });
+
+  test.each([
+    ["an empty list", { months: [] }],
+    ["a non-boolean classification flag", { months: ["2025-07"], categorizeUncategorized: "yes" }],
+    ["a non-list value", { months: "2025-07" }],
+    ["an invalid month", { months: ["2025-07", "2025-13"] }],
+    ["a duplicated month", { months: ["2025-07", "2025-07"] }],
+    ["a single month at the same time", { month: "2025-07", months: ["2025-08"] }],
+    ["all months at the same time", { allMonths: true, months: ["2025-08"] }],
+    [
+      "more than 36 months",
+      {
+        months: Array.from(
+          { length: 37 },
+          (_, i) => `${2020 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`,
+        ),
+      },
+    ],
+  ])("rejects requested months with %s", async (_, body) => {
+    const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
+    const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
+
+    const res = await fetch(`${baseUrl}/runs`, {
+      method: "POST",
+      headers: { ...authorizationHeaders, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(400);
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   test("starts requested-month uncategorized classification", async () => {
     const startRun = vi.fn<() => Promise<CrawlerRunState>>(async () => runningState);
     const baseUrl = await listen(createCrawlerTriggerServer({ startRun }));
