@@ -3,6 +3,7 @@ import { applyMoneyForwardOperation } from "./operations.js";
 
 const mocks = vi.hoisted(() => ({
   scrapeCashFlowHistory: vi.fn(),
+  goToCashFlowMonth: vi.fn(),
   scrapeCategoryCandidates: vi.fn(),
   getCsrfToken: vi.fn(),
   updateTransactionCategory: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../scrapers/cash-flow-history.js", () => ({
   scrapeCashFlowHistory: mocks.scrapeCashFlowHistory,
+  goToCashFlowMonth: mocks.goToCashFlowMonth,
 }));
 vi.mock("../scrapers/category-candidates.js", () => ({
   scrapeCategoryCandidates: mocks.scrapeCategoryCandidates,
@@ -62,6 +64,23 @@ describe("applyMoneyForwardOperation", () => {
       isIncome: false,
       isTarget: false,
     });
+  });
+
+  test("returns to the month's cash flow table before updating the row", async () => {
+    await applyMoneyForwardOperation({} as never, {
+      type: "set-calculation-exclusion",
+      transactionId: "mf-tx-1",
+      month: "2025-07",
+      excluded: true,
+    });
+
+    expect(mocks.goToCashFlowMonth).toHaveBeenCalledWith(expect.anything(), "2025-07");
+    expect(mocks.scrapeCategoryCandidates.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.goToCashFlowMonth.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.goToCashFlowMonth.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.updateTransactionCategory.mock.invocationCallOrder[0]!,
+    );
   });
 
   test("does not call MoneyForward when the transaction already has the requested state", async () => {

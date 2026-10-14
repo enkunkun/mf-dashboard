@@ -5,6 +5,7 @@ import type { CashFlowItem, CashFlowSummary } from "@mf-dashboard/db/types";
 import type { Page } from "playwright";
 import { getCsrfToken } from "../hooks/helpers.js";
 import { info, warn } from "../logger.js";
+import { goToCashFlowMonth } from "../scrapers/cash-flow-history.js";
 import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 import { applyCategoryDecisions } from "./apply.js";
 import { CategoryDecisionEngine, selectTransactionsForCategorization } from "./engine.js";
@@ -137,6 +138,8 @@ export async function categorizeCashFlowMonth(options: {
       return cashFlow;
     }
 
+    // 更新は表示中の行の編集フォームを土台にするため、その月の明細を開いておく
+    await goToCashFlowMonth(page, cashFlow.month);
     const csrfToken = await getCsrfToken(page);
     if (!csrfToken) {
       warn("Skipped category update because CSRF token was not found.");

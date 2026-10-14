@@ -4,6 +4,7 @@ import type { Page } from "playwright";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { getCsrfToken } from "../hooks/helpers.js";
 import { warn } from "../logger.js";
+import { goToCashFlowMonth } from "../scrapers/cash-flow-history.js";
 import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 import { applyCategoryDecisions } from "./apply.js";
 import { categorizeCashFlowMonth } from "./categorize-cash-flow.js";
@@ -24,6 +25,10 @@ vi.mock("../hooks/helpers.js", () => ({
 vi.mock("../logger.js", () => ({
   info: vi.fn<(...args: unknown[]) => void>(),
   warn: vi.fn<(...args: unknown[]) => void>(),
+}));
+
+vi.mock("../scrapers/cash-flow-history.js", () => ({
+  goToCashFlowMonth: vi.fn<() => Promise<void>>(),
 }));
 
 vi.mock("../scrapers/category-candidates.js", () => ({
@@ -107,6 +112,28 @@ describe("categorizeCashFlowMonth", () => {
     expect(
       vi.mocked(applyCategoryDecisions).mock.calls[0]?.[0].decisions[0]?.transaction.mfId,
     ).toBe("new");
+  });
+
+  test("カテゴリを反映する前にその月の明細を表示する", async () => {
+    const page = {} as Page;
+    vi.mocked(findExistingTransactionMfIds).mockResolvedValue(new Set());
+    vi.mocked(applyCategoryDecisions).mockResolvedValue({
+      appliedCount: 0,
+      appliedDecisions: [],
+    });
+
+    await categorizeCashFlowMonth({
+      page,
+      db: {} as Parameters<typeof categorizeCashFlowMonth>[0]["db"],
+      cashFlow: cashFlow("2025-07", [item("new")]),
+      config,
+      usage: { llmCallsUsed: 0 },
+    });
+
+    expect(goToCashFlowMonth).toHaveBeenCalledWith(page, "2025-07");
+    expect(vi.mocked(goToCashFlowMonth).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(applyCategoryDecisions).mock.invocationCallOrder[0]!,
+    );
   });
 
   test("既存の未分類取引も明示指定時は再分類対象にする", async () => {

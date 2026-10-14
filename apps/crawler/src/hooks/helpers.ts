@@ -12,31 +12,68 @@ export async function getCsrfToken(page: Page): Promise<string | null> {
   return token || null;
 }
 
+type CategoryUpdateOptions = {
+  largeCategoryId: string;
+  middleCategoryId: string;
+  isIncome?: boolean;
+  isTarget?: boolean;
+};
+
+const AMOUNT_FIELD = "user_asset_act[amount]";
+
+/**
+ * 行の編集フォームの全項目を土台に /cf/update の本文を作る。
+ * 手入力行は金額・日付・内容・口座を送らないと MoneyForward が 0 円などで上書きするため、
+ * カテゴリと計算対象以外はフォームの値をそのまま送る。
+ */
+export function buildCategoryUpdateBody(
+  transactionId: string,
+  rowFields: Record<string, string>,
+  options: CategoryUpdateOptions,
+): string {
+  if (rowFields["user_asset_act[id]"] !== transactionId) {
+    throw new Error("Transaction form id does not match the requested transaction");
+  }
+
+  const body = new URLSearchParams(rowFields);
+  body.set("user_asset_act[large_category_id]", options.largeCategoryId);
+  body.set("user_asset_act[middle_category_id]", options.middleCategoryId);
+  body.set("user_asset_act[is_income]", options.isIncome ? "1" : "0");
+  body.set("user_asset_act[is_target]", (options.isTarget ?? true) ? "1" : "0");
+  const amount = rowFields[AMOUNT_FIELD];
+  // フォームの表示値は "-5,338" の形。金額は絶対値で送り、収支は is_income で表す
+  if (amount !== undefined) body.set(AMOUNT_FIELD, amount.replace(/[-,\s]/g, ""));
+  return body.toString();
+}
+
 /**
  * トランザクションのカテゴリを更新する
- * /cf/update API を呼び出す
+ * 表示中の /cf の行から編集フォームを読み、/cf/update API を呼び出す。
+ * 行が表示されていなければ、項目の欠けた本文で上書きしないよう何も送らない。
  */
 export async function updateTransactionCategory(
   page: Page,
   csrfToken: string,
   transactionId: string,
-  options: {
-    largeCategoryId: string;
-    middleCategoryId: string;
-    isIncome?: boolean;
-    isTarget?: boolean;
-  },
+  options: CategoryUpdateOptions,
 ): Promise<{ ok: boolean; status: number }> {
-  return page.evaluate(
-    async ({ id, csrf, largeCatId, middleCatId, isIncome, isTarget }) => {
-      const formData = new URLSearchParams();
-      formData.append("user_asset_act[id]", id);
-      formData.append("user_asset_act[large_category_id]", largeCatId);
-      formData.append("user_asset_act[middle_category_id]", middleCatId);
-      formData.append("user_asset_act[is_income]", isIncome ? "1" : "0");
-      formData.append("user_asset_act[is_target]", isTarget ? "1" : "0");
-      formData.append("user_asset_act[table_name]", "user_asset_act");
+  const rowFields = await page.evaluate((id) => {
+    const row = document.getElementById(`js-transaction-${id}`);
+    if (!row) return null;
+    const fields: Record<string, string> = {};
+    // 同名の項目は後ろのもの（表示用の select など）を採る
+    row
+      .querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[name], select[name]")
+      .forEach((element) => {
+        fields[element.name] = element.value;
+      });
+    return fields;
+  }, transactionId);
+  if (!rowFields) return { ok: false, status: 0 };
 
+  const body = buildCategoryUpdateBody(transactionId, rowFields, options);
+  return page.evaluate(
+    async ({ body, csrf }) => {
       const res = await fetch("/cf/update", {
         method: "PUT",
         headers: {
@@ -44,18 +81,11 @@ export async function updateTransactionCategory(
           "X-CSRF-Token": csrf,
           "X-Requested-With": "XMLHttpRequest",
         },
-        body: formData.toString(),
+        body,
       });
       return { status: res.status, ok: res.ok };
     },
-    {
-      id: transactionId,
-      csrf: csrfToken,
-      largeCatId: options.largeCategoryId,
-      middleCatId: options.middleCategoryId,
-      isIncome: options.isIncome ?? false,
-      isTarget: options.isTarget ?? true,
-    },
+    { body, csrf: csrfToken },
   );
 }
 

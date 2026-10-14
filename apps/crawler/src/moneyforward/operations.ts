@@ -1,7 +1,7 @@
 import type { CashFlowItem } from "@mf-dashboard/db/types";
 import type { Page } from "playwright";
 import { getCsrfToken, updateTransactionCategory } from "../hooks/helpers.js";
-import { scrapeCashFlowHistory } from "../scrapers/cash-flow-history.js";
+import { goToCashFlowMonth, scrapeCashFlowHistory } from "../scrapers/cash-flow-history.js";
 import { scrapeCategoryCandidates } from "../scrapers/category-candidates.js";
 
 export type MoneyForwardOperation = {
@@ -47,6 +47,8 @@ export async function applyMoneyForwardOperation(
     throw new Error("Could not uniquely resolve the transaction's current MoneyForward category");
   }
 
+  // 候補の取得で別ページへ移るため、行の編集フォームを読めるよう月の明細へ戻る
+  await goToCashFlowMonth(page, operation.month);
   const csrfToken = await getCsrfToken(page);
   if (!csrfToken) throw new Error("MoneyForward CSRF token is unavailable");
 
