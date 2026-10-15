@@ -117,6 +117,8 @@ services:
       SKIP_REFRESH: ${SKIP_REFRESH:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      SUICA_OP_ITEM: ${SUICA_OP_ITEM:-}
+      SUICA_OP_VAULT: ${SUICA_OP_VAULT:-}
       TZ: Asia/Tokyo
       WEB_URL: ${WEB_URL:-http://web:8765}
     volumes:

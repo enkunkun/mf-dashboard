@@ -15,6 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { BrowserContext, CDPSession, Page } from "playwright";
+import { getOpClient } from "../../src/auth/op-client.js";
 
 export type Passkey = {
   credentialId: string;
@@ -141,10 +142,61 @@ function loadFrom1Password(): { passkey: Passkey; username?: string } | null {
 }
 
 /**
- * JRE ID のパスキーを取得する。
- * 優先順: 1Password CLI → Bitwarden CLI（BW_SESSION があれば）→ エクスポートファイル。
+ * 1Password SDK から JRE ID パスキーを取得する（コンテナ用）。
+ * `op` CLI の無い環境でも OP_SERVICE_ACCOUNT_TOKEN があれば読める。
+ * 項目には credentialId / privateKey / rpId / userHandle / signCount / discoverable を
+ * custom field として保存しておく。
  */
-export function loadJrePasskey(exportPath?: string): { passkey: Passkey; username?: string } {
+async function loadFrom1PasswordSdk(): Promise<{ passkey: Passkey; username?: string } | null> {
+  if (!process.env.OP_SERVICE_ACCOUNT_TOKEN) return null;
+  const title = process.env.SUICA_OP_ITEM ?? "JRE ID passkey (Suica)";
+  const vaultName = process.env.SUICA_OP_VAULT ?? process.env.OP_VAULT ?? "apps";
+  try {
+    const client = await getOpClient();
+    const vault = (await client.vaults.list()).find(
+      (v) => v.title === vaultName || v.id === vaultName,
+    );
+    if (!vault) return null;
+    const overview = (await client.items.list(vault.id)).find(
+      (i) => i.title === title || i.id === title,
+    );
+    if (!overview) return null;
+    const item = await client.items.get(vault.id, overview.id);
+    const get = (key: string): string | undefined => {
+      const field = item.fields.find((f) => f.id === key || f.title === key);
+      return field?.value === undefined || field.value === null ? undefined : String(field.value);
+    };
+    const privateKey = get("privateKey");
+    const credentialId = get("credentialId");
+    if (!privateKey || !credentialId) return null;
+    return {
+      username: get("username"),
+      passkey: {
+        credentialId,
+        rpId: get("rpId") ?? "id.jreast.co.jp",
+        privateKey,
+        userHandle: get("userHandle") || undefined,
+        signCount: Number(get("signCount") ?? 0) || 0,
+        discoverable: (get("discoverable") ?? "true") === "true",
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * JRE ID のパスキーを取得する。
+ * 優先順: 1Password SDK → 1Password CLI → Bitwarden CLI（BW_SESSION があれば）→ エクスポートファイル。
+ */
+export async function loadJrePasskey(
+  exportPath?: string,
+): Promise<{ passkey: Passkey; username?: string }> {
+  const fromSdk = await loadFrom1PasswordSdk();
+  if (fromSdk) {
+    console.log("パスキー取得元: 1Password (SDK)");
+    return fromSdk;
+  }
   const from1password = loadFrom1Password();
   if (from1password) {
     console.log("パスキー取得元: 1Password (op item get)");
@@ -225,7 +277,7 @@ export async function loginWithPasskey(
   context: BrowserContext,
   exportPath?: string,
 ): Promise<void> {
-  const { passkey, username } = loadJrePasskey(exportPath);
+  const { passkey, username } = await loadJrePasskey(exportPath);
   await installPasskeyAuthenticator(context, page, passkey);
 
   await page.goto("https://www.mobilesuica.com/", { waitUntil: "domcontentloaded" });

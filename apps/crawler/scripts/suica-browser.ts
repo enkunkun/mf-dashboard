@@ -30,12 +30,16 @@ export async function connectSuicaBrowser(): Promise<{
   return { context, page };
 }
 
-/** 永続ブラウザを起動して常駐させる */
+/**
+ * 永続ブラウザを起動する。
+ * 既定は headless（コンテナ実行用）。ローカルで画面を見たいときは HEADED=1 を付ける。
+ * Chrome 固有機能は使わないので Playwright 同梱の Chromium で動かす。
+ */
 export async function launchSuicaBrowser(): Promise<{ context: BrowserContext; page: Page }> {
+  const headless = !process.env.HEADED;
   const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    channel: "chrome",
-    headless: false,
-    viewport: null,
+    headless,
+    viewport: headless ? { width: 1280, height: 900 } : null,
     locale: "ja-JP",
     timezoneId: "Asia/Tokyo",
     args: [
@@ -67,6 +71,8 @@ export async function getSuicaPage(): Promise<{
 }
 
 async function main() {
+  // 常駐ブラウザとして手元で使う想定なので、既定は画面あり
+  process.env.HEADED ??= "1";
   const { context, page } = await launchSuicaBrowser();
   console.log(`永続ブラウザ起動: profile=${PROFILE_DIR}`);
   console.log(`CDP: ${CDP_URL}`);

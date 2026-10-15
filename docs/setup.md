@@ -429,7 +429,7 @@ docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypa
 
 ### モバイルSuica 利用履歴の取込
 
-モバイルSuica の SF（電子マネー）利用履歴を取得し、Money Forward ME の手動口座「モバイルSuica」へ取り込む。JRE ID へのログインにパスキーと、CDP 接続した実 Chrome が必要なため、**この工程は Mac 側で行う**（crawler コンテナや cron では実行しない。PayPay のログイン工程と同じ扱い）。
+モバイルSuica の SF（電子マネー）利用履歴を取得し、Money Forward ME の手動口座「モバイルSuica」へ取り込む。JRE ID へのログインはパスキー（1Password 保管）と CDP の WebAuthn 仮想認証器で自動化しており、**crawler コンテナが毎日 07:10（JST）に自動実行する**。
 
 #### 1Password にパスキー項目を作る
 
@@ -439,25 +439,31 @@ docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypa
 - 保管庫: `SUICA_OP_VAULT`に設定する値（既定`apps`）
 - フィールド: `credentialId` `privateKey` `rpId` `userHandle` `signCount` `discoverable` `username`（`username`は任意）
 
-パスキーは 1Password CLI（`op`）→ Bitwarden CLI（`BW_SESSION`があるとき）→ Bitwarden エクスポート（`--export`または`JRE_EXPORT`。既定は`~/Downloads`の最新`bitwarden_export_*.json`）の順に探す。
+パスキーは 1Password SDK（`OP_SERVICE_ACCOUNT_TOKEN`）→ `op` CLI → Bitwarden CLI（`BW_SESSION`があるとき）→ Bitwarden エクスポート（`--export`または`JRE_EXPORT`。既定は`~/Downloads`の最新`bitwarden_export_*.json`）の順に探す。コンテナは SDK 経路を使う。
 
-#### 実行（Mac）
+#### サーバーでの動作
 
-永続ブラウザを起動しておく（CDP 9223、プロファイル`data/suica-profile`）。以降のスクリプトはこのブラウザに CDP で接続して再利用する。
-
-```sh
-pnpm --filter @mf-dashboard/crawler exec tsx scripts/suica-browser.ts
-```
-
-別のターミナルで取り込む（既定は取得と表示のみ）。
+crawlerコンテナ内のsupercronicが`docker/crawler/crontab`のスケジュールで毎日07:10に実行する。手動で今すぐ実行する場合は次のコマンドを使う。
 
 ```sh
-pnpm --filter @mf-dashboard/crawler sync:suica                     # 取得と表示のみ
-pnpm --filter @mf-dashboard/crawler sync:suica -- --apply          # Money Forward へ登録
-pnpm --filter @mf-dashboard/crawler sync:suica -- --reset --apply  # 口座を作り直して全再取込
+# 取得と表示のみ
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/suica-sync.ts
+# 取得 + 取込
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/suica-sync.ts --apply
 ```
 
 - 取込先は手動口座「モバイルSuica」（区分は`電子マネー・プリペイド`）。無ければ作成する
 - 履歴は直近190日を、指定日から遡って最大100件ずつ取得する。取得後、明細から現在残高を再計算し Suica 表示の残高と突き合わせる
-- 履歴を表示できるのは 5:00〜翌0:50 のみ。時間外はエラーになる
+- 履歴を表示できるのは 5:00〜翌0:50 のみ。スケジュールはこの窓の内側に置く
+- スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
+
+#### ローカル（Mac）で実行する
+
+Playwright 同梱の Chromium を headless で使うので、実 Chrome は不要。永続ブラウザを起動しておけば CDP で再利用する（画面を見たいときは`HEADED=1`）。
+
+```sh
+pnpm --filter @mf-dashboard/crawler exec tsx scripts/suica-browser.ts   # 常駐ブラウザ（HEADED=1 で画面あり）
+pnpm --filter @mf-dashboard/crawler sync:suica -- --apply               # 取得 + 取込
+```
+
 - ログイン確認だけなら`scripts/suica-login.ts`、履歴ページの構造調査は`scripts/suica-history.ts`を使う
