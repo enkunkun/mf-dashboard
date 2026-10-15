@@ -5,6 +5,7 @@ import {
   type CashFlowDetailCell,
   type CashFlowDetailRow,
   extractCashFlowFromPage,
+  goToCashFlowMonth,
   isSupportedCashFlowAmount,
   parseDetailRow,
   resolveCashFlowDate,
@@ -423,5 +424,91 @@ describe("parseDetailRow", () => {
     const row = makeDetailRow({});
 
     expect(() => parseDetailRow(row, 2026)).toThrow("Incomplete cash flow transaction row");
+  });
+});
+
+describe("goToCashFlowMonth", () => {
+  function makeFakePage(initial: { url: string; month: string }) {
+    const state = { ...initial, gotoCount: 0, clicks: [] as string[] };
+    const button = (direction: "prev" | "next") => {
+      const locator = {
+        first: () => locator,
+        click: async () => {
+          state.clicks.push(direction);
+          const [y, m] = state.month.split("-").map(Number);
+          const index = y! * 12 + (m! - 1) + (direction === "next" ? 1 : -1);
+          state.month = `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
+        },
+      };
+      return locator;
+    };
+    const page = {
+      url: () => state.url,
+      goto: async () => {
+        state.gotoCount++;
+        state.url = "https://moneyforward.com/cf";
+        state.month = "2026-10";
+        return null;
+      },
+      evaluate: async () => undefined,
+      waitForFunction: async () => undefined,
+      waitForResponse: async () => ({ finished: async () => null }),
+      locator: (selector: string) => {
+        if (selector === "#cf-detail-table") {
+          const table = {
+            first: () => table,
+            isVisible: async () => true,
+            waitFor: async () => undefined,
+          };
+          return table;
+        }
+        if (selector === "a[href*='/cf/csv']") {
+          const link = {
+            first: () => link,
+            count: async () => 1,
+            getAttribute: async () => {
+              const [y, m] = state.month.split("-").map(Number);
+              return `/cf/csv?year=${y}&month=${m}`;
+            },
+          };
+          return link;
+        }
+        if (selector.includes("fc-button-prev")) return button("prev");
+        if (selector.includes("fc-button-next")) return button("next");
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+    };
+    return { page: page as unknown as Page, state };
+  }
+
+  test("開いている /cf を開き直さず、表示中の月から翌月へ進む", async () => {
+    const { page, state } = makeFakePage({ url: "https://moneyforward.com/cf", month: "2018-07" });
+
+    await goToCashFlowMonth(page, "2018-10");
+
+    expect(state.gotoCount).toBe(0);
+    expect(state.clicks).toEqual(["next", "next", "next"]);
+    expect(state.month).toBe("2018-10");
+  });
+
+  test("開いている /cf から前月へ戻る", async () => {
+    const { page, state } = makeFakePage({ url: "https://moneyforward.com/cf", month: "2018-10" });
+
+    await goToCashFlowMonth(page, "2018-09");
+
+    expect(state.gotoCount).toBe(0);
+    expect(state.clicks).toEqual(["prev"]);
+  });
+
+  test("/cf 以外にいるときは開き直して当月から戻る", async () => {
+    const { page, state } = makeFakePage({
+      url: "https://moneyforward.com/bs/portfolio",
+      month: "2018-07",
+    });
+
+    await goToCashFlowMonth(page, "2026-08");
+
+    expect(state.gotoCount).toBe(1);
+    expect(state.clicks).toEqual(["prev", "prev"]);
   });
 });

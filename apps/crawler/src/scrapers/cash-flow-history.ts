@@ -480,9 +480,17 @@ async function getDisplayedCashFlowMonth(page: Page): Promise<string> {
   return (await detectMonth(page)).month;
 }
 
-async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
+const MONTH_BUTTON_SELECTORS = {
+  previous: "button.fc-button-prev, span.fc-button-prev",
+  next: "button.fc-button-next, span.fc-button-next",
+} as const;
+
+async function stepCashFlowMonth(
+  page: Page,
+  direction: keyof typeof MONTH_BUTTON_SELECTORS,
+): Promise<boolean> {
   const currentMonth = await getDisplayedCashFlowMonth(page);
-  const prevButton = page.locator("button.fc-button-prev, span.fc-button-prev").first();
+  const prevButton = page.locator(MONTH_BUTTON_SELECTORS[direction]).first();
   await waitForCashFlowFetchApplied(page, async () => {
     const [fetchResponse] = await Promise.all([
       page.waitForResponse((res) => res.url().includes("/cf/fetch") && res.status() === 200, {
@@ -501,6 +509,23 @@ async function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
   return true;
 }
 
+function goToPreviousCashFlowMonth(page: Page): Promise<boolean> {
+  return stepCashFlowMonth(page, "previous");
+}
+
+/**
+ * 既に開いている /cf を再利用できるか。明細テーブルが見えていれば、
+ * 開き直さずに表示中の月から前月・翌月ボタンで移動できる。
+ */
+async function isCashFlowPageOpen(page: Page): Promise<boolean> {
+  try {
+    if (new URL(page.url()).pathname !== new URL(mfUrls.cashFlow).pathname) return false;
+    return await page.locator("#cf-detail-table").first().isVisible();
+  } catch {
+    return false;
+  }
+}
+
 async function openCashFlowPage(page: Page): Promise<void> {
   await page.goto(mfUrls.cashFlow, { waitUntil: "domcontentloaded" });
   // テーブルが表示されるまで待機
@@ -512,8 +537,9 @@ async function navigateToCashFlowMonth(page: Page, month: string): Promise<void>
     throw new Error("Invalid target cash flow month");
   }
   let displayedMonth = await getDisplayedCashFlowMonth(page);
-  while (displayedMonth > month) {
-    if (!(await goToPreviousCashFlowMonth(page))) {
+  while (displayedMonth !== month) {
+    const direction = displayedMonth > month ? "previous" : "next";
+    if (!(await stepCashFlowMonth(page, direction))) {
       throw new Error(`MoneyForward does not have cash flow data for ${month}`);
     }
     displayedMonth = await getDisplayedCashFlowMonth(page);
@@ -524,10 +550,12 @@ async function navigateToCashFlowMonth(page: Page, month: string): Promise<void>
 }
 
 /**
- * /cf を開き直し、指定した月の明細が表示されるまで前月へ戻る
+ * 指定した月の明細が表示されるまで月送りする。
+ * /cf が開いていれば表示中の月から前月・翌月へ移動し、開き直して当月から
+ * 戻る往復（過去の月ほど数十回のクリック）を避ける。
  */
 export async function goToCashFlowMonth(page: Page, month: string): Promise<void> {
-  await openCashFlowPage(page);
+  if (!(await isCashFlowPageOpen(page))) await openCashFlowPage(page);
   await navigateToCashFlowMonth(page, month);
 }
 
