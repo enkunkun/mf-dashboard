@@ -55,6 +55,22 @@ async function deleteRow(page: Page, mfId: string, token: string): Promise<strin
   );
 }
 
+/**
+ * 振替の行には削除リンクが出ず、DELETE を送っても 200 のまま消えない。
+ * 先に振替を解除して通常の明細に戻す。
+ */
+async function disableTransfer(page: Page, mfId: string, token: string): Promise<string> {
+  return await page.evaluate(
+    async ({ mfId, token }) => {
+      const r = await fetch(`/cf/update.js?change_type=disable_transfer&id=${mfId}`, {
+        headers: { "X-CSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
+      });
+      return `status=${r.status}`;
+    },
+    { mfId, token },
+  );
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const apply = args.includes("--apply");
@@ -84,6 +100,13 @@ async function main(): Promise<void> {
 
     const token = await getCsrfToken(page);
     if (!token) throw new Error("CSRF token not found");
+    const transfers = duplicates.filter((d) => d.type === "transfer");
+    for (const d of transfers) {
+      console.log(`振替解除 ${d.mfId}: ${await disableTransfer(page, d.mfId, token)}`);
+      await page.waitForTimeout(300);
+    }
+    if (transfers.length > 0) await goToCashFlowMonth(page, month);
+
     for (const d of duplicates) {
       console.log(`削除 ${d.mfId}: ${await deleteRow(page, d.mfId, token)}`);
       await page.waitForTimeout(300);
