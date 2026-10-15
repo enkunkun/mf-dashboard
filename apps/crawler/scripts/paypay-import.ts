@@ -156,7 +156,7 @@ function classify(row: {
       };
 }
 
-function loadEntries(): Entry[] {
+export function loadEntries(): Entry[] {
   const files = fs
     .readdirSync(CSV_DIR)
     .filter((f) => /^paypay_\d.*\.csv$/.test(f))
