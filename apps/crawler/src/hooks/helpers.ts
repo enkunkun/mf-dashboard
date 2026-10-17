@@ -47,17 +47,14 @@ export function buildCategoryUpdateBody(
 }
 
 /**
- * トランザクションのカテゴリを更新する
- * 表示中の /cf の行から編集フォームを読み、/cf/update API を呼び出す。
- * 行が表示されていなければ、項目の欠けた本文で上書きしないよう何も送らない。
+ * 表示中の /cf の行の編集フォームの全項目を読む。
+ * 行が表示されていなければ null。
  */
-export async function updateTransactionCategory(
+export async function readTransactionRowFields(
   page: Page,
-  csrfToken: string,
   transactionId: string,
-  options: CategoryUpdateOptions,
-): Promise<{ ok: boolean; status: number }> {
-  const rowFields = await page.evaluate((id) => {
+): Promise<Record<string, string> | null> {
+  return await page.evaluate((id) => {
     const row = document.getElementById(`js-transaction-${id}`);
     if (!row) return null;
     const fields: Record<string, string> = {};
@@ -69,9 +66,14 @@ export async function updateTransactionCategory(
       });
     return fields;
   }, transactionId);
-  if (!rowFields) return { ok: false, status: 0 };
+}
 
-  const body = buildCategoryUpdateBody(transactionId, rowFields, options);
+/** /cf/update を PUT で叩く */
+export async function putCfUpdate(
+  page: Page,
+  csrfToken: string,
+  body: string,
+): Promise<{ ok: boolean; status: number }> {
   return page.evaluate(
     async ({ body, csrf }) => {
       const res = await fetch("/cf/update", {
@@ -87,6 +89,24 @@ export async function updateTransactionCategory(
     },
     { body, csrf: csrfToken },
   );
+}
+
+/**
+ * トランザクションのカテゴリを更新する
+ * 表示中の /cf の行から編集フォームを読み、/cf/update API を呼び出す。
+ * 行が表示されていなければ、項目の欠けた本文で上書きしないよう何も送らない。
+ */
+export async function updateTransactionCategory(
+  page: Page,
+  csrfToken: string,
+  transactionId: string,
+  options: CategoryUpdateOptions,
+): Promise<{ ok: boolean; status: number }> {
+  const rowFields = await readTransactionRowFields(page, transactionId);
+  if (!rowFields) return { ok: false, status: 0 };
+
+  const body = buildCategoryUpdateBody(transactionId, rowFields, options);
+  return putCfUpdate(page, csrfToken, body);
 }
 
 /**
