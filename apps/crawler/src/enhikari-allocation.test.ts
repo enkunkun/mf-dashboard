@@ -81,13 +81,73 @@ describe("planEnhikariAllocation", () => {
     expect(plan[0]).toMatchObject({ status: "skip", reason: "一致 0 件" });
   });
 
-  test("既に計算対象外なら何もしない", () => {
+  test("既に計算対象外で按分もあれば何もしない", () => {
+    const plan = planEnhikariAllocation(
+      config,
+      [
+        item({ isExcludedFromCalculation: true }),
+        item({ mfId: "2", description: "enひかり電気", amount: 12000 }),
+        item({ mfId: "3", description: "enひかり光（光コラボ）", amount: 8000 }),
+      ],
+      candidates,
+    );
+    expect(plan[0]).toMatchObject({ status: "done", reason: "按分済み" });
+  });
+
+  test("計算対象外なのに按分が無ければ按分だけ作る（支出が消えた状態の復旧）", () => {
     const plan = planEnhikariAllocation(
       config,
       [item({ isExcludedFromCalculation: true })],
       candidates,
     );
-    expect(plan[0]).toMatchObject({ status: "noop", reason: "既に計算対象外" });
+    const applied = plan[0]!;
+    if (applied.status !== "apply") throw new Error(applied.status);
+    expect(applied.create).toEqual(["electricity", "internet"]);
+    expect(applied.excludeOriginal).toBe(false);
+  });
+
+  test("按分の片方だけあれば足りない方だけ作る", () => {
+    const plan = planEnhikariAllocation(
+      config,
+      [
+        item({ isExcludedFromCalculation: true }),
+        item({ mfId: "2", description: "enひかり電気", amount: 12000 }),
+      ],
+      candidates,
+    );
+    const applied = plan[0]!;
+    if (applied.status !== "apply") throw new Error(applied.status);
+    expect(applied.create).toEqual(["internet"]);
+  });
+
+  test("按分が既にあれば元の明細を外すだけ", () => {
+    const plan = planEnhikariAllocation(
+      config,
+      [
+        item({}),
+        item({ mfId: "2", description: "enひかり電気", amount: 12000 }),
+        item({ mfId: "3", description: "enひかり光（光コラボ）", amount: 8000 }),
+      ],
+      candidates,
+    );
+    const applied = plan[0]!;
+    if (applied.status !== "apply") throw new Error(applied.status);
+    expect(applied.create).toEqual([]);
+    expect(applied.excludeOriginal).toBe(true);
+  });
+
+  test("按分の金額が変わっていれば触らない", () => {
+    const plan = planEnhikariAllocation(
+      config,
+      [
+        item({}),
+        item({ mfId: "2", description: "enひかり電気", amount: 13000 }),
+        item({ mfId: "3", description: "enひかり光（光コラボ）", amount: 7000 }),
+      ],
+      candidates,
+    );
+    expect(plan[0]).toMatchObject({ status: "skip" });
+    expect((plan[0] as { reason: string }).reason).toContain("按分の金額が既存と違う");
   });
 
   test("電気代が明細の金額以上なら書き換えない", () => {
@@ -154,7 +214,7 @@ describe("buildSplitCreateBody", () => {
     expect(body.get("user_asset_act[is_income]")).toBe("0");
     expect(body.get("user_asset_act[is_transfer]")).toBe("0");
     expect(body.get("user_asset_act[amount]")).toBe("12000");
-    expect(body.get("user_asset_act[updated_at]")).toBe("2026-07-24");
+    expect(body.get("user_asset_act[updated_at]")).toBe("2026/07/24");
     expect(body.get("user_asset_act[large_category_id]")).toBe("5");
     expect(body.get("user_asset_act[middle_category_id]")).toBe("51");
     expect(body.get("user_asset_act[content]")).toBe("enひかり電気");

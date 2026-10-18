@@ -40,9 +40,16 @@ export type EnhikariAllocationPlan =
       internet: number;
       electricityCandidate: CategoryCandidate;
       internetCandidate: CategoryCandidate;
+      /** 登録する按分の明細（既に同じものがあれば含まない） */
+      create: EnhikariSplitPart[];
+      /** 元の明細を計算対象外にする必要があるか（既に外れていれば false） */
+      excludeOriginal: boolean;
     }
-  | { status: "noop"; month: string; reason: string }
+  | { status: "done"; month: string; reason: string }
   | { status: "skip"; month: string; reason: string };
+
+/** 登録が必要な按分の側 */
+type EnhikariSplitPart = "electricity" | "internet";
 
 /** 設定に書かれた月を古い順に返す */
 export function allocationMonths(config: EnhikariAllocationConfig): string[] {
@@ -53,6 +60,7 @@ export function planEnhikariAllocation(
   config: EnhikariAllocationConfig,
   items: CashFlowItem[],
   candidates: CategoryCandidate[],
+  contents: { electricity: string; internet: string } = DEFAULT_CONTENTS,
 ): EnhikariAllocationPlan[] {
   return allocationMonths(config).map((month): EnhikariAllocationPlan => {
     const electricity = config.electricityByMonth[month]!;
@@ -68,9 +76,6 @@ export function planEnhikariAllocation(
     if (matches.length !== 1 || !item) {
       return { status: "skip", month, reason: `一致 ${matches.length} 件` };
     }
-    if (item.isExcludedFromCalculation) {
-      return { status: "noop", month, reason: "既に計算対象外" };
-    }
     if (!Number.isInteger(electricity) || electricity <= 0) {
       return { status: "skip", month, reason: `電気代 ${electricity} が正の整数でない` };
     }
@@ -81,6 +86,7 @@ export function planEnhikariAllocation(
         reason: `電気代 ${electricity} が明細の金額 ${item.amount} 以上`,
       };
     }
+    const internet = item.amount - electricity;
 
     const findCandidate = (target: { category: string; subcategory: string }) =>
       candidates.find(
@@ -105,14 +111,41 @@ export function planEnhikariAllocation(
       }
     }
 
+    // 既に登録されている按分の明細。金額が違うものは取り違えを避けて触らない
+    const inMonth = items.filter((i) => i.date.startsWith(`${month}-`));
+    const existing = (content: string) => inMonth.filter((i) => i.description === content);
+    const conflicts = [
+      ...existing(contents.electricity).filter((i) => i.amount !== electricity),
+      ...existing(contents.internet).filter((i) => i.amount !== internet),
+    ];
+    if (conflicts.length > 0) {
+      return {
+        status: "skip",
+        month,
+        reason: `按分の金額が既存と違う（${conflicts
+          .map((i) => `${i.description} ${i.amount} 円`)
+          .join(", ")}）`,
+      };
+    }
+    const create: EnhikariSplitPart[] = [];
+    if (existing(contents.electricity).length === 0) create.push("electricity");
+    if (existing(contents.internet).length === 0) create.push("internet");
+    if (create.length === 0 && item.isExcludedFromCalculation) {
+      return { status: "done", month, reason: "按分済み" };
+    }
+
     return {
       status: "apply",
       month,
       item,
       electricity,
-      internet: item.amount - electricity,
+      internet,
       electricityCandidate: electricityCandidate!,
       internetCandidate: internetCandidate!,
+      create,
+      // 元の明細が計算対象のままなら外す。既に外れているが按分が欠けている場合は
+      // 支出が消えたままなので、按分だけ作る
+      excludeOriginal: !item.isExcludedFromCalculation,
     };
   });
 }
@@ -120,6 +153,7 @@ export function planEnhikariAllocation(
 /** /cf/create の本文。支出元なしの明細を分類つきで 1 件登録する */
 export function buildSplitCreateBody(params: {
   token: string;
+  /** YYYY-MM-DD。MF のフォームは YYYY/MM/DD しか受け付けない（- 区切りだと黙って捨てられる） */
   date: string;
   amount: number;
   content: string;
@@ -130,7 +164,7 @@ export function buildSplitCreateBody(params: {
   body.append("authenticity_token", params.token);
   body.append("user_asset_act[is_transfer]", "0");
   body.append("user_asset_act[is_income]", "0");
-  body.append("user_asset_act[updated_at]", params.date);
+  body.append("user_asset_act[updated_at]", params.date.replace(/-/g, "/"));
   body.append("user_asset_act[amount]", String(params.amount));
   body.append("user_asset_act[sub_account_id_hash]", NO_SOURCE_SUB_ACCOUNT_HASH);
   body.append("user_asset_act[large_category_id]", params.largeCategoryId);
