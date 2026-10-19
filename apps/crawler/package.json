@@ -25,9 +25,15 @@
     "sync:enhikari": "tsx --env-file=../../.env scripts/enhikari-billing.ts",
     "sync:enhikari-alloc": "tsx --env-file=../../.env scripts/enhikari-alloc.ts",
     "sync:paypay": "tsx --env-file=../../.env scripts/paypay-sync.ts",
+    "famipay:fetch": "tsx --env-file=../../.env scripts/famipay-fetch.ts",
+    "sync:famipay": "tsx --env-file=../../.env scripts/famipay-sync.ts",
     "test": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "famipay:receipts": "tsx --env-file=../../.env scripts/famipay-receipts.ts",
+    "famipay:classify": "tsx --env-file=../../.env scripts/famipay-classify.ts",
+    "famipay:categorize": "tsx --env-file=../../.env scripts/famipay-categorize.ts",
+    "famipay:fix-charges": "tsx --env-file=../../.env scripts/famipay-fix-charges.ts"
   },
   "dependencies": {
     "@1password/sdk": "0.5.0",

@@ -6,7 +6,8 @@
   "exports": {
     "./categories": "./src/categories.ts",
     "./urls": "./src/urls.ts",
-    "./groups": "./src/groups.ts"
+    "./groups": "./src/groups.ts",
+    "./famipay-categories": "./src/famipay-categories.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -427,6 +427,102 @@ docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/paypa
 - スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
 - ログイン（実 Chrome）はデプロイ先のホストでは行えないため、トークンが失効した場合はローカルで再ログインして1Passwordを更新する
 
+### FamiPay の残高・利用履歴の取込
+
+ファミペイ Android アプリ（`jp.co.family.familymart_app`）の非公開 API を直接呼び、残高と利用履歴を取得する。アプリの静的解析で判明した仕様は次のとおり。
+
+- すべて `https://famipay.family.co.jp/` への `application/x-www-form-urlencoded` の POST
+- ただし `api/public/v1/...` 系（`getZandaka`、`authenticationCheck`）だけは `https://hcsep.famipay.family.co.jp/` にある
+- 共通フィールドは `API_ENCRYPTION_KEY`（固定値）と `LOGIN_TERMINAL_ID`（端末識別子。端末 attestation ではなく任意の値でよい）
+- 残高は `api/public/v1/getZandaka`（`MN_ZNDK` が残高、`PT_ZNDK` がボーナス、`ATOBARAI_ZNDK` があと払い）
+- 履歴は `api/public/listFamipayHistory.jsp`、金額の内訳は明細 1 件ごとに `api/public/generateFamipayHistoryDetail.jsp`
+
+認証は `KAIIN_HASH_KEY` を使うが、その初回発行だけは Web ログイン（`webview/login.html`）の遷移先 URL に載る `APPLICATION_AUTHENTICATION_TOKEN` から `api/public/acquireMemberInformation.jsp` を叩いて得る。**毎回のログインで SMS のワンタイムコード入力が必要**なため、この工程だけは実 Chrome で人が操作する。
+
+#### 1Password に認証情報項目を作る
+
+`OP_VAULT`と同じ保管庫に、ファミペイのログイン情報を保管する項目を作る。
+
+- 項目の種類: `Login`または`Password`（任意）
+- 項目名: `OP_FAMIPAY_ITEM`に設定する値（例: `FamiPay`）
+- フィールド: `username`に**電話番号（11桁・ハイフンなし）**、`password`にパスワード
+
+ログインフォームは電話番号とパスワードだけを求める（メールアドレスや会員番号ではない）。
+
+`.env`へ次を追加する。
+
+```dotenv
+OP_FAMIPAY_ITEM=FamiPay
+OP_FAMIPAY_VAULT=apps
+```
+
+#### ログインの仕組み（実物で確認済み）
+
+`webview/login.html` の中身は次のとおり。
+
+- 入力欄は `input[name="CP_NO"]`（電話番号）と `input[name="KAIIN_PASSWD"]`（パスワード）の 2 つ
+- `LOGIN_HASH` はページ側の JS が `MD5(電話番号 + パスワード + "login_hash_seed")` で組み立てるので、値はそのまま入力すればよい
+- 「ログイン」ボタン（`button.buttonPrimary`）は `send_with_sms()` を呼び、**必ず SMS 認証**へ進む
+- 認証が通ると `APPLICATION_AUTHENTICATION_TOKEN` が
+  `/webview/appaction.html?DESTINATION=...&APPLICATION_AUTHENTICATION_TOKEN=...`
+  として URL に載る。アプリはこの URL を WebViewClient で拾っている（`LoginPresenterImpl.onReceiveQueryParam`）
+
+SMS の送信回数は cookie で数えており、上限を超えると一時的に送れなくなる。ログインボタンは連打しないこと。
+
+#### 残高と履歴を取得する
+
+ブラウザは常駐させて 1 つだけ使う（毎回起動・終了しない）。先に常駐ブラウザを起こしておくと、以降のスクリプトは CDP でそこへ接続する。
+
+```sh
+# 常駐ブラウザを起動（Ctrl+C で終了するまで常駐）
+npx tsx --env-file=../../.env apps/crawler/scripts/famipay-browser.ts
+
+# 直近60日を取得（セッションが無効なら、常駐ブラウザでログインが始まる）
+pnpm --filter @mf-dashboard/crawler famipay:fetch
+
+# 期間を指定。--no-detail を付けると明細APIを叩かず履歴一覧だけ取る
+pnpm --filter @mf-dashboard/crawler exec tsx --env-file=../../.env scripts/famipay-fetch.ts --from 20260101 --to 20260131
+```
+
+1Password の値が自動入力され、「ログイン」も自動で押される。SMS に届くワンタイムコードだけ手で入力する。セッションは `data/famipay-session.json`、ブラウザのプロファイルは `data/famipay-profile` に保存される。
+
+取得結果は `data/famipay-balance.json` と `data/famipay-history.json` へ出力する。同時に取引の種類ごとの収入・支出の件数を表示するので、金額の向きの解釈が正しいかを確認できる。
+
+#### Money Forward ME への取込
+
+手動口座「ファミペイ」（区分はモバイルSuica と同じ `電子マネー・プリペイド`）を作り、履歴を収支として登録したうえで、残高を実際の値へ補正する。
+
+取引の向きは `TORIHIKI_KBN` で決まる（1=支払い、2=チャージ、3=返金、9=その他）。金額は `MONEY_CASH + MONEY_PREPAID` を使う。これらはアプリの明細画面の実装（`DetailActivity` / `FamipayHistoryEntryModel`）と一致する。
+
+```sh
+# dry-run（取得と表示のみ）
+pnpm --filter @mf-dashboard/crawler sync:famipay
+
+# MF へ登録
+pnpm --filter @mf-dashboard/crawler sync:famipay -- --apply
+
+# 口座を作り直して全再取込
+pnpm --filter @mf-dashboard/crawler sync:famipay -- --apply --reset
+```
+
+明細 API は 1 件 1 リクエストなので、結果を `data/famipay-details.json` に貯めて再利用する。取り直したいときは `--refresh-details` を付ける。取込済みの ID は `data/famipay-synced-ids.json` に記録し、二重登録を防ぐ。
+
+`あと払い`（`ATOBARAI_ZNDK`）は取得しているが取り込んでいない。必要になったら口座を分けて追加する。
+
+チャージは同期直後は「収入」として登録される。そのままだと家計簿上も収入として計上されるため、PayPay と同じく「PayPayカード → ファミペイ」の振替に直す。MF の画面操作（`enable_transfer` → 振替元の設定）を自動化している。
+
+同時に、カード側に残る同額の支出（「ＦａｍｉＰａｙチャージ」）を計算対象外にする。振替にしただけだと、カード側の支出がそのまま家計簿の支出として残り、チャージ分が二重に引かれるため。明細は残したまま集計から外す。
+
+```sh
+# dry-run（対象の一覧のみ）
+pnpm --filter @mf-dashboard/crawler famipay:fix-charges
+
+# 振替に直す
+pnpm --filter @mf-dashboard/crawler famipay:fix-charges --apply
+```
+
+振替元は、同じ日・同じ金額の支出が別口座にある場合にその口座を使う（既定は `PayPayカード`）。ファミペイ口座の残高は変えずに、収入の二重計上だけを外す。
+
 ### モバイルSuica 利用履歴の取込
 
 モバイルSuica の SF（電子マネー）利用履歴を取得し、Money Forward ME の手動口座「モバイルSuica」へ取り込む。JRE ID へのログインはパスキー（1Password 保管）と CDP の WebAuthn 仮想認証器で自動化しており、**crawler コンテナが毎日 07:10（JST）に自動実行する**。
