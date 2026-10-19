@@ -467,3 +467,48 @@ pnpm --filter @mf-dashboard/crawler sync:suica -- --apply               # 取得
 ```
 
 - ログイン確認だけなら`scripts/suica-login.ts`、履歴ページの構造調査は`scripts/suica-history.ts`を使う
+
+### enひかり電気料金の按分
+
+enひかり電気の料金は enひかり本体（光回線）と合算され、NTT東日本の「光コラボ回収代行分」としてカードに月1件で計上される。そのままだと家計簿上は全額が通信費になるため、次の3つを行う。
+
+1. 電気代の明細を「支出元なし」で登録する（分類: 水道・光熱費 / 電気代）
+2. 残り（光回線など）の明細を「支出元なし」で登録する（分類: 通信費 / インターネット）
+3. 元のカード明細を計算対象外にする（カードの残高と支出合計は変わらない）
+
+#### 1Password に認証情報項目を作る
+
+`OP_VAULT`と同じ保管庫に、enひかり電気の会員ページの認証情報を保管する項目を作る。
+
+- 項目名: `OP_ENHIKARI_ITEM`に設定する値（既定`enhikari.jp`）
+- 保管庫: `OP_ENHIKARI_VAULT`に設定する値（既定`apps`）
+- フィールド: `username`（お客様ID）、`password`
+
+#### 実行
+
+```sh
+# 会員ページのご利用明細から按分ファイルを作る（電気代を月ごとに取り直す）
+pnpm --filter @mf-dashboard/crawler sync:enhikari
+# 計画を確認（dry-run）
+pnpm --filter @mf-dashboard/crawler sync:enhikari-alloc -- ~/.local/share/mf-dashboard/enhikari-alloc.json
+# 反映
+pnpm --filter @mf-dashboard/crawler sync:enhikari-alloc -- ~/.local/share/mf-dashboard/enhikari-alloc.json --apply
+```
+
+- 按分ファイルには個人の請求額が入るためリポジトリの外に置く（既定`~/.local/share/mf-dashboard/enhikari-alloc.json`）
+- 会員ページの明細は過去24か月分。**明細の月 + 2か月後**のカード請求に対応する（例: 2026年7月分の明細 → 2026-09-24の請求）
+- 電気代は enひかり電気の税込合計を四捨五入した額、残りが光回線分になる（実測で光回線分は月5,576円前後）
+- 会員ページの明細が無い月は何もしない。`--only 2026-07,2026-08`で月を絞れる
+- 反映は再実行できる。按分の明細が既にあれば登録せず、元の明細を計算対象外にするだけになる
+- 元の明細だけが計算対象外になっている月（按分が欠けた状態）は、按分の明細を作り直す
+- `--apply`は元の明細を外す前に、登録した2件が明細に出ているかを読み直して確認する。片方でも欠けていれば外さない
+- 明細の登録は`updated_at`が`YYYY/MM/DD`でないと MF 側で黙って捨てられる。スクリプトはこの形式に変換して送る
+
+#### サーバーでの動作
+
+毎月の手動実行を前提にしており、`docker/crawler/crontab`には入れていない。翌月のカード請求が出たあとに次を実行する。
+
+```sh
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/enhikari-billing.ts
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/enhikari-alloc.ts /app/data/enhikari-alloc.json --apply
+```
