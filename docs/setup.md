@@ -642,9 +642,13 @@ pnpm --filter @mf-dashboard/crawler sync:enhikari-alloc -- ~/.local/share/mf-das
 
 #### サーバーでの動作
 
-毎月の手動実行を前提にしており、`docker/crawler/crontab`には入れていない。翌月のカード請求が出たあとに次を実行する。
+`docker/crawler/crontab`で毎日 07:30 に按分ファイルを作り、07:40 に反映する（`--apply`）。毎日走るが、反映は再実行できるので二重登録しない。enひかりの明細がまだ無い月は何もしない。
+
+- 按分ファイルはコンテナから見える`/app/data/enhikari-alloc.json`に置く。個人の請求額が入るが`data/*`はgitignore済み
+- 1Passwordは`OP_SERVICE_ACCOUNT_TOKEN`が`OP_ENHIKARI_VAULT`（既定`apps`）を読める必要がある
+- 手で流すときは同じパスを指定する
 
 ```sh
-docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/enhikari-billing.ts
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/enhikari-billing.ts --out /app/data/enhikari-alloc.json
 docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/enhikari-alloc.ts /app/data/enhikari-alloc.json --apply
 ```

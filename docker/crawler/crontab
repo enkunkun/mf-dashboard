@@ -3,3 +3,5 @@
 0 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/paypay-sync.ts
 10 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/suica-sync.ts --apply
 20 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/coban-sync.ts --apply
+30 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/enhikari-billing.ts --out /app/data/enhikari-alloc.json
+40 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/enhikari-alloc.ts /app/data/enhikari-alloc.json --apply
