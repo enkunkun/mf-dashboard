@@ -22,6 +22,7 @@
     "sync:revolut-csv": "tsx --env-file=../../.env scripts/sync-revolut-csv.ts",
     "status:revolut": "tsx scripts/revolut-status.ts",
     "sync:suica": "tsx --env-file=../../.env scripts/suica-sync.ts",
+    "sync:coban": "tsx --env-file=../../.env scripts/coban-sync.ts",
     "sync:enhikari": "tsx --env-file=../../.env scripts/enhikari-billing.ts",
     "sync:enhikari-alloc": "tsx --env-file=../../.env scripts/enhikari-alloc.ts",
     "sync:paypay": "tsx --env-file=../../.env scripts/paypay-sync.ts",

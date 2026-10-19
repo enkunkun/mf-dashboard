@@ -564,6 +564,46 @@ pnpm --filter @mf-dashboard/crawler sync:suica -- --apply               # 取得
 
 - ログイン確認だけなら`scripts/suica-login.ts`、履歴ページの構造調査は`scripts/suica-history.ts`を使う
 
+### pixivcoban 残高・利用履歴の取込
+
+pixivcoban（プリペイド式電子マネー）の残高と入出金履歴を取得し、Money Forward ME の手動口座「pixivcoban」へ取り込む。pixiv アカウントでのログインは 1Password の認証情報で自動化しており、**crawler コンテナが毎日 07:20（JST）に自動実行する**。
+
+#### 1Password に認証情報項目を作る
+
+`OP_VAULT`と同じ保管庫に、pixiv アカウントの認証情報を保管する項目を作る。
+
+- 項目名: `OP_COBAN_ITEM`に設定する値（例: `oauth.secure.pixiv.net`）
+- フィールド: `username`（メールアドレスまたは pixiv ID）、`password`
+
+#### サーバーでの動作
+
+crawlerコンテナ内のsupercronicが`docker/crawler/crontab`のスケジュールで毎日07:20に実行する。手動で今すぐ実行する場合は次のコマンドを使う。
+
+```sh
+# 取得と表示のみ
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/coban-sync.ts
+# 取得 + 取込
+docker compose exec -w /app/apps/crawler crawler node --import tsx scripts/coban-sync.ts --apply
+```
+
+- 取込先は手動口座「pixivcoban」（区分は`電子マネー・プリペイド`）。無ければ作成する
+- コバン購入・コバン付与は収入、コバン利用・コバン失効は支出として登録する
+- 明細は`(date_time|type|amount|detail)`のキーで`data/coban-synced-ids.json`に記録し、取り込み済みは再登録しない（窓を重ねて再取得しても二重登録しない）
+- 口座残高は coban の表示残高へ補正する。coban の履歴には欠落があり得るため、残高は表示値を正とする
+- pixiv のセッションは永続プロファイル（`data/coban-browser-profile`）に保存される。失効して reCAPTCHA でログインできない場合は、ローカルで再ログインしてプロファイルを更新する
+- スケジュールを変更する場合は`docker/crawler/crontab`を編集し、`docker compose build crawler`でcrawlerを再ビルドする
+
+#### ローカル（Mac）で実行する
+
+Playwright 同梱の Chromium を headless で使うので、実 Chrome は不要。永続ブラウザを起動しておけば CDP で再利用する（画面を見たいときは`HEADED=1`）。
+
+```sh
+pnpm --filter @mf-dashboard/crawler exec tsx scripts/coban-browser.ts  # 常駐ブラウザ（HEADED=1 で画面あり）
+pnpm --filter @mf-dashboard/crawler sync:coban -- --apply              # 取得 + 取込
+```
+
+- 構造調査は`debug/coban-explore.ts`、任意の JS 実行は`debug/coban-eval.ts`を使う。API の詳細は`debug/coban-api-notes.md`にある
+
 ### enひかり電気料金の按分
 
 enひかり電気の料金は enひかり本体（光回線）と合算され、NTT東日本の「光コラボ回収代行分」としてカードに月1件で計上される。そのままだと家計簿上は全額が通信費になるため、次の3つを行う。

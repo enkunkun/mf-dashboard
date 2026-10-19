@@ -2,3 +2,4 @@
 30 15 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx src/index.ts
 0 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/paypay-sync.ts
 10 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/suica-sync.ts --apply
+20 7 * * * cd /app/apps/crawler && CRAWLER_RUN_SOURCE=scheduled node --import tsx scripts/coban-sync.ts --apply
