@@ -409,7 +409,9 @@ export async function runExistingCashFlowCategorizationPhase(
   categoryDecision: CategoryDecisionRuntime,
   progress?: CrawlerProgressReporter,
 ): Promise<number> {
-  const months = (await getAvailableMonths(undefined, db)).map(({ month }) => month).reverse();
+  // /cf は開いたとき当月を表示し、月移動は前月ボタン 1 クリックで 1 か月。
+  // 古い順に回すと当月から最古月まで逆走してから戻る二度手間になるため、新しい順に処理する。
+  const months = (await getAvailableMonths(undefined, db)).map(({ month }) => month);
   if (months.length === 0) return 0;
 
   const candidates = await scrapeCategoryCandidates(page);
