@@ -36,6 +36,18 @@ export interface LLMCategoryDecision {
   reason: string;
 }
 
+/**
+ * 商品名からカテゴリを選ぶときの指針。
+ * オークションやECの商品名は品目そのもので判断させ、衣類とスポーツ用品のような
+ * 大項目の取り違えを減らす。未分類のヤフオク落札品で「衣服」と「スポーツ」が
+ * 割れ、confidence が 0.65 に届かず未分類のまま残っていた。
+ */
+const ITEM_CATEGORY_GUIDELINES = `品目からカテゴリを選ぶときの指針:
+- オークションやECの商品名は、購入した品目そのもので判断する（店名や送料の記載は無視する）。
+- スポーツ用の衣類・道具（体操服・ジャージ・ユニフォーム・ピステ・コンプレッションウエア・競泳水着など）は「趣味・娯楽 > スポーツ」を選ぶ。衣類であってもスポーツ用品ならスポーツを優先する。
+- PC・サーバー機器（サーバー本体・HDD・SSD・メモリ・マウンタ・CPUなど）は「趣味・娯楽 > パソコン」を選ぶ。
+- スキー・スノーボード用品は「趣味・娯楽 > アウトドア」を選ぶ。`;
+
 const categoryDecisionSchema = z.object({
   largeCategoryId: z.string(),
   middleCategoryId: z.string(),
@@ -114,7 +126,9 @@ export async function generateCategoryDecisionsWithLLM(
           },
           {
             type: "text",
-            text: `以下のJSON配列に含まれる各取引に最も適したカテゴリIDの組み合わせを選んでください。判断できない取引はdecisionsに含めないでください。出力indexは入力と一致させてください。\n\nBEGIN_UNTRUSTED_JSON\n${transactionData}\nEND_UNTRUSTED_JSON\n\n各decisionにindex、largeCategoryId、middleCategoryId、confidence、reasonを含めてください。confidenceは0から1の数値で、候補に強く一致するときだけ高くしてください。`,
+            text: `以下のJSON配列に含まれる各取引に最も適したカテゴリIDの組み合わせを選んでください。判断できない取引はdecisionsに含めないでください。出力indexは入力と一致させてください。\n\nBEGIN_UNTRUSTED_JSON\n${transactionData}\nEND_UNTRUSTED_JSON\n\n各decisionにindex、largeCategoryId、middleCategoryId、confidence、reasonを含めてください。confidenceは0から1の数値で、候補に強く一致するときだけ高くしてください。
+
+${ITEM_CATEGORY_GUIDELINES}`,
           },
         ],
       },
@@ -171,7 +185,9 @@ BEGIN_UNTRUSTED_JSON
 ${categorizationData}
 END_UNTRUSTED_JSON
 
-confidenceは0から1の数値で、候補に強く一致するときだけ高くしてください。`,
+confidenceは0から1の数値で、候補に強く一致するときだけ高くしてください。
+
+${ITEM_CATEGORY_GUIDELINES}`,
   });
 
   if (!result.output) return null;
