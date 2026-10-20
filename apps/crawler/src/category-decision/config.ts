@@ -39,14 +39,21 @@ function parseRules(value: unknown, warn: (...args: unknown[]) => void): Categor
 
     const accountName = parseOptionalNonEmptyString(item.accountName);
     const descriptionContains = parseOptionalNonEmptyString(item.descriptionContains);
+    const olderThanMonths =
+      typeof item.olderThanMonths === "number" &&
+      Number.isFinite(item.olderThanMonths) &&
+      item.olderThanMonths > 0
+        ? item.olderThanMonths
+        : undefined;
     if (
-      (accountName || descriptionContains) &&
+      (accountName || descriptionContains || olderThanMonths !== undefined) &&
       typeof item.category === "string" &&
       typeof item.subCategory === "string"
     ) {
       rules.push({
         ...(accountName ? { accountName } : {}),
         ...(descriptionContains ? { descriptionContains } : {}),
+        ...(olderThanMonths !== undefined ? { olderThanMonths } : {}),
         category: item.category,
         subCategory: item.subCategory,
       });
@@ -54,7 +61,7 @@ function parseRules(value: unknown, warn: (...args: unknown[]) => void): Categor
     }
 
     warn(
-      "Invalid category rule ignored: accountName or descriptionContains must be a non-empty string",
+      "Invalid category rule ignored: accountName, descriptionContains or olderThanMonths is required",
     );
   }
   return rules;

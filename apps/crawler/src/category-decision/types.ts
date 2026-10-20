@@ -1,6 +1,11 @@
 export interface CategoryRuleConfig {
   accountName?: string;
   descriptionContains?: string;
+  /**
+   * この月数より古い取引にだけ当てる。
+   * 追跡できない古い未分類をまとめて整理するための条件で、単独でも使える。
+   */
+  olderThanMonths?: number;
   category: string;
   subCategory: string;
 }

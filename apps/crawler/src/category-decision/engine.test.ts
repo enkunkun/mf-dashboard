@@ -101,6 +101,39 @@ describe("CategoryDecisionEngine", () => {
     expect(llmDecider).not.toHaveBeenCalled();
   });
 
+  test("olderThanMonths のルールは古い取引にだけ当たる", async () => {
+    const config: NormalizedCategoryDecisionConfig = {
+      llm: { enabled: false, maxPerRun: 5, minConfidence: 0.65 },
+      rules: [{ olderThanMonths: 12, category: "食費", subCategory: "食料品" }],
+    };
+    const engine = new CategoryDecisionEngine({
+      config,
+      candidates,
+      now: () => new Date("2026-10-20T00:00:00Z"),
+    });
+
+    const results = await engine.decideMany([
+      tx({ mfId: "old", date: "2024-03-01" }),
+      tx({ mfId: "recent", date: "2026-09-01" }),
+    ]);
+
+    expect(results.map((item) => item.transaction.mfId)).toEqual(["old"]);
+    expect(results[0]?.decision).toMatchObject({ source: "rule", confidence: 1 });
+  });
+
+  test("反対側の候補しかないルールの警告は1回だけ出す", async () => {
+    const warn = vi.fn<(...args: unknown[]) => void>();
+    const config: NormalizedCategoryDecisionConfig = {
+      llm: { enabled: false, maxPerRun: 5, minConfidence: 0.65 },
+      rules: [{ descriptionContains: "Service A", category: "収入", subCategory: "給与" }],
+    };
+    const engine = new CategoryDecisionEngine({ config, candidates, warn });
+
+    await engine.decideMany([tx({ mfId: "a" }), tx({ mfId: "b" }), tx({ mfId: "c" })]);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   test("存在しないカテゴリを指す固定ルールは無効化してwarnする", async () => {
     const warn = vi.fn<(...args: unknown[]) => void>();
     const config: NormalizedCategoryDecisionConfig = {

@@ -17,6 +17,7 @@ interface CategoryDecisionEngineOptions {
   llmBatchDecider?: LLMCategoryBatchDecider;
   warn?: (...args: unknown[]) => void;
   usage?: CategoryDecisionUsage;
+  now?: () => Date;
 }
 
 export function selectTransactionsForCategorization(
@@ -72,13 +73,33 @@ function findCandidateById(
   );
 }
 
+function subtractMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  result.setMonth(result.getMonth() - months);
+  return result;
+}
+
+function isOlderThanMonths(value: string, months: number, now: Date): boolean {
+  const cutoff = subtractMonths(now, months).toISOString().slice(0, 10);
+  return value < cutoff;
+}
+
 function ruleMatches(
   transaction: TransactionForCategorization,
   rule: NormalizedCategoryDecisionConfig["rules"][number],
+  now: Date,
 ): boolean {
-  if (!rule.accountName && !rule.descriptionContains) return false;
+  if (!rule.accountName && !rule.descriptionContains && rule.olderThanMonths === undefined) {
+    return false;
+  }
   if (rule.accountName && transaction.accountName !== rule.accountName) return false;
   if (rule.descriptionContains && !transaction.description.includes(rule.descriptionContains)) {
+    return false;
+  }
+  if (
+    rule.olderThanMonths !== undefined &&
+    !isOlderThanMonths(transaction.date, rule.olderThanMonths, now)
+  ) {
     return false;
   }
   return true;
@@ -92,6 +113,8 @@ export class CategoryDecisionEngine {
   readonly #llmBatchDecider: LLMCategoryBatchDecider | undefined;
   readonly #warn: (...args: unknown[]) => void;
   readonly #usage: CategoryDecisionUsage;
+  readonly #now: () => Date;
+  readonly #warnedInvalidRules = new Set<string>();
 
   constructor(options: CategoryDecisionEngineOptions) {
     this.#config = options.config;
@@ -100,6 +123,7 @@ export class CategoryDecisionEngine {
     this.#llmBatchDecider = options.llmBatchDecider;
     this.#warn = options.warn ?? (() => {});
     this.#usage = options.usage ?? { llmCallsUsed: 0 };
+    this.#now = options.now ?? (() => new Date());
   }
 
   async decideMany(
@@ -216,7 +240,7 @@ export class CategoryDecisionEngine {
 
   #decideByRule(transaction: TransactionForCategorization): ResolvedCategoryDecision | null {
     for (const rule of this.#config.rules) {
-      if (!ruleMatches(transaction, rule)) continue;
+      if (!ruleMatches(transaction, rule, this.#now())) continue;
 
       const candidate = findCandidateByName(
         this.#candidates,
@@ -226,9 +250,15 @@ export class CategoryDecisionEngine {
       );
 
       if (!candidate) {
-        this.#warn(
-          `Invalid category rule ignored: ${rule.category} > ${rule.subCategory} is not in Money Forward candidates`,
-        );
+        // 収入と支出で候補が分かれるため、反対側の候補しか持たないルールは正常に起きる。
+        // 同じルールでログを埋めないよう、ルールごとに一度だけ警告する
+        const key = `${rule.accountName ?? ""}|${rule.descriptionContains ?? ""}|${rule.olderThanMonths ?? ""}|${rule.category}|${rule.subCategory}`;
+        if (!this.#warnedInvalidRules.has(key)) {
+          this.#warnedInvalidRules.add(key);
+          this.#warn(
+            `Invalid category rule ignored: ${rule.category} > ${rule.subCategory} is not in Money Forward candidates`,
+          );
+        }
         continue;
       }
 
