@@ -3,6 +3,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getAgentObservabilityInstrumentation } from "./agent-observability.js";
 import { getModel, isLLMEnabled } from "./config.js";
+import { correctMerchantDescription } from "./merchant-description.js";
 
 export interface CategoryCandidateForLLM {
   largeCategoryId: string;
@@ -51,7 +52,8 @@ const ITEM_CATEGORY_GUIDELINES = `品目からカテゴリを選ぶときの指�
 - スポーツ用の衣類・道具（体操服・ジャージ・ユニフォーム・ピステ・コンプレッションウエア・競泳水着など）は「趣味・娯楽 > スポーツ」を選ぶ。衣類であってもスポーツ用品ならスポーツを優先する。
 - PC・サーバー機器（サーバー本体・HDD・SSD・メモリ・マウンタ・CPUなど）は「趣味・娯楽 > パソコン」を選ぶ。
 - スキー・スノーボード用品は「趣味・娯楽 > アウトドア」を選ぶ。
-- 収入（type が income）の取引は、商品名ではなく入金の性質で判断する。ヤフオクなどで出品物を売った代金は「収入 > 売却」を選ぶ。商品名がスポーツ用品やPCでも、支出カテゴリ（趣味・娯楽など）を選んではいけない。`;
+- 収入（type が income）の取引は、商品名ではなく入金の性質で判断する。ヤフオクなどで出品物を売った代金は「収入 > 売却」を選ぶ。商品名がスポーツ用品やPCでも、支出カテゴリ（趣味・娯楽など）を選んではいけない。
+- クレジットカード明細（DCカード・Kyash など）の description は、カード会社の仕様で半角カナが全角カナに変換され、小書き文字（ョ・ャ・ッ）が大きく、長音が「-」に潰れている。description はその潰れを戻した補正値で、原本が異なるときだけ descriptionRaw に入れている。潰れていても店名として読み替え、読み取れた店舗の業態で分類する。補正で意味が通る場合に confidence を下げすぎない。`;
 
 const categoryDecisionSchema = z.object({
   largeCategoryId: z.string(),
@@ -98,13 +100,19 @@ export async function generateCategoryDecisionsWithLLM(
     2,
   );
   const transactionData = JSON.stringify(
-    items.map(({ transaction }, index) => ({
-      index,
-      date: transaction.date,
-      amount: transaction.amount,
-      type: transaction.type,
-      description: transaction.description,
-    })),
+    items.map(({ transaction }, index) => {
+      const corrected = correctMerchantDescription(transaction.description);
+      return {
+        index,
+        date: transaction.date,
+        amount: transaction.amount,
+        type: transaction.type,
+        description: corrected,
+        ...(corrected === transaction.description
+          ? {}
+          : { descriptionRaw: transaction.description }),
+      };
+    }),
     null,
     2,
   );
