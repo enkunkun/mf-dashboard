@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { schema } from "../index";
 import { createTestDb, resetTestDb, closeTestDb } from "../test-helpers";
-import { getTransactions, getTransactionsByMonth, getTransactionsByAccountId } from "./transaction";
+import {
+  getTransactions,
+  getTransactionsByMonth,
+  getTransactionsByAccountId,
+  getTransactionsForCategorizationByMonth,
+} from "./transaction";
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 let db: Db;
@@ -280,5 +285,45 @@ describe("getTransactionsByAccountId", () => {
     await createTransaction({ accountId, date: "2025-04-15", amount: 3000, type: "expense" });
 
     expect(await getTransactionsByAccountId(9999, undefined, db)).toEqual([]);
+  });
+});
+
+describe("getTransactionsForCategorizationByMonth", () => {
+  it("グループ未所属の口座は既定で除外し、includeAccountsOutsideGroup 指定時は含める", async () => {
+    const inGroupAccountId = await createTestAccount("In Group");
+    const now = new Date().toISOString();
+    const outsideAccount = await db
+      .insert(schema.accounts)
+      .values({
+        mfId: "mf_outside_group",
+        name: "Outside Group",
+        type: "自動連携",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+
+    await createTransaction({
+      accountId: inGroupAccountId,
+      date: "2026-09-05",
+      amount: 1000,
+      type: "expense",
+    });
+    await createTransaction({
+      accountId: outsideAccount.id,
+      date: "2026-09-06",
+      amount: 2000,
+      type: "expense",
+    });
+
+    const scoped = await getTransactionsForCategorizationByMonth("2026-09", TEST_GROUP_ID, db);
+    expect(scoped.map((item) => item.accountName)).toEqual(["In Group"]);
+
+    const all = await getTransactionsForCategorizationByMonth("2026-09", TEST_GROUP_ID, db, {
+      includeAccountsOutsideGroup: true,
+    });
+    expect(all).toHaveLength(2);
+    expect(all.map((item) => item.accountName)).toContain("Outside Group");
   });
 });

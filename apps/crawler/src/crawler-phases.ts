@@ -420,7 +420,9 @@ export async function runExistingCashFlowCategorizationPhase(
       ? await progress.startStep(CRAWLER_STEPS.monthlyCashFlow, { month })
       : undefined;
     try {
-      const items = await getTransactionsForCategorizationByMonth(month, undefined, db);
+      const items = await getTransactionsForCategorizationByMonth(month, undefined, db, {
+        includeAccountsOutsideGroup: true,
+      });
       await categorizeCashFlowMonth({
         page,
         db,

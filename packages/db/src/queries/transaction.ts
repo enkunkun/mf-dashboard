@@ -105,16 +105,28 @@ export async function getTransactionsByMonth(
   return results.map((t) => transformTransferToIncome(t, accountIds));
 }
 
+export interface CategorizationQueryOptions {
+  /**
+   * グループ未所属の口座も対象に含める。
+   * MF 側でグループを作っていない場合でも全口座を分類するために使う。
+   */
+  includeAccountsOutsideGroup?: boolean;
+}
+
 export async function getTransactionsForCategorizationByMonth(
   month: string,
   groupIdParam?: string,
   db: Db = getDb(),
+  options: CategorizationQueryOptions = {},
 ): Promise<CashFlowItem[]> {
-  const groupId = await resolveGroupId(db, groupIdParam);
-  if (!groupId) return [];
+  let accountIds: number[] | undefined;
+  if (!options.includeAccountsOutsideGroup) {
+    const groupId = await resolveGroupId(db, groupIdParam);
+    if (!groupId) return [];
 
-  const accountIds = await getAccountIdsForGroup(db, groupId);
-  if (accountIds.length === 0) return [];
+    accountIds = await getAccountIdsForGroup(db, groupId);
+    if (accountIds.length === 0) return [];
+  }
 
   const rows = await db
     .select({
@@ -136,7 +148,7 @@ export async function getTransactionsForCategorizationByMonth(
       and(
         gte(schema.transactions.date, `${month}-01`),
         lte(schema.transactions.date, `${month}-31`),
-        inArray(schema.transactions.accountId, accountIds),
+        ...(accountIds ? [inArray(schema.transactions.accountId, accountIds)] : []),
       ),
     )
     .orderBy(desc(schema.transactions.date))
